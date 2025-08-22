@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akten Ordner (Offline)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .item-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 1rem;
+        }
+        .item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            position: relative;
+        }
+        .item .delete-btn {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background-color: red;
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .item:hover .delete-btn {
+            opacity: 1;
+        }
+        .word-break {
+            word-break: break-word;
+        }
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 5px solid #3498db;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <!-- Hauptcontainer der App -->
+    <div id="app" class="max-w-4xl mx-auto p-4">
+        
+        <!-- Header -->
+        <header class="flex items-center justify-between mb-4">
+            <button id="back-btn" class="p-2 rounded-md hover:bg-gray-200">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <div class="flex items-center gap-3">
+                <h1 id="current-folder-name" class="text-2xl font-bold">Hauptmenü</h1>
+                <div id="status-indicator" class="w-3 h-3 rounded-full transition-colors" title=""></div>
+            </div>
+            <div class="w-8"></div> <!-- Platzhalter -->
+        </header>
+
+        <!-- Breadcrumb-Navigation -->
+        <nav class="mb-4 text-sm text-gray-500" id="breadcrumb"></nav>
+
+        <!-- Container für Ordner und Dateien -->
+        <main id="item-container" class="item-grid p-4 bg-white rounded-lg shadow-md min-h-[300px]">
+            <!-- Inhalte werden per JS geladen -->
+        </main>
+
+        <!-- Floating Action Buttons -->
+        <div class="fixed bottom-8 right-8 flex flex-col gap-4">
+            <button id="add-folder-btn" class="bg-blue-500 text-white w-16 h-16 rounded-full shadow-lg flex items-center justify-center text-2xl hover:bg-blue-600 transition-transform transform hover:scale-110">
+                <i class="fas fa-folder-plus"></i>
+            </button>
+            <button id="scan-file-btn" class="bg-green-500 text-white w-16 h-16 rounded-full shadow-lg flex items-center justify-center text-2xl hover:bg-green-600 transition-transform transform hover:scale-110">
+                <i class="fas fa-camera"></i>
+                <span id="ai-badge" class="absolute top-0 right-0 bg-yellow-400 text-black text-xs font-bold rounded-full px-1.5 py-0.5">✨ KI</span>
+            </button>
+        </div>
+        
+        <!-- Hinweis zur Datenspeicherung -->
+        <footer class="text-center text-xs text-gray-400 mt-4">
+            <p>Alle Daten werden sicher im lokalen Speicher Ihres Browsers gespeichert und sind offline verfügbar.</p>
+        </footer>
+    </div>
+
+    <!-- Kamera-Modal -->
+    <div id="camera-modal" class="fixed inset-0 bg-black bg-opacity-75 hidden flex-col items-center justify-center z-50">
+        <video id="camera-view" class="w-full max-w-lg h-auto" autoplay playsinline></video>
+        <canvas id="camera-canvas" class="hidden"></canvas>
+        <div class="flex gap-4 mt-4">
+            <button id="capture-btn" class="bg-blue-500 text-white px-6 py-3 rounded-full text-lg shadow-lg">Foto machen</button>
+            <button id="cancel-camera-btn" class="bg-gray-500 text-white px-6 py-3 rounded-full text-lg shadow-lg">Abbrechen</button>
+        </div>
+    </div>
+
+    <!-- Bestätigungs-Modal -->
+    <div id="confirm-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg shadow-xl text-center">
+            <p id="confirm-message" class="mb-4 text-lg">Wollen Sie dies wirklich löschen?</p>
+            <div class="flex justify-center gap-4">
+                <button id="confirm-yes" class="bg-red-500 text-white px-6 py-2 rounded-md hover:bg-red-600">Ja</button>
+                <button id="confirm-no" class="bg-gray-300 text-gray-800 px-6 py-2 rounded-md hover:bg-gray-400">Nein</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Lade-Modal für KI-Analyse -->
+    <div id="loading-modal" class="fixed inset-0 bg-black bg-opacity-60 hidden items-center justify-center z-[60]">
+        <div class="bg-white p-8 rounded-lg shadow-xl text-center flex flex-col items-center">
+            <div class="loader mb-4"></div>
+            <p class="text-lg font-semibold">✨ Dokument wird analysiert...</p>
+            <p class="text-sm text-gray-600">Bitte einen Moment Geduld.</p>
+        </div>
+    </div>
+
+
+    <script>
+        // Initialisierung der jsPDF-Bibliothek
+        const { jsPDF } = window.jspdf;
+
+        // DOM-Elemente
+        const statusIndicator = document.getElementById('status-indicator');
+        const aiBadge = document.getElementById('ai-badge');
+        const scanFileBtn = document.getElementById('scan-file-btn');
+        const backBtn = document.getElementById('back-btn');
+        const currentFolderNameEl = document.getElementById('current-folder-name');
+        const breadcrumbEl = document.getElementById('breadcrumb');
+        const itemContainer = document.getElementById('item-container');
+        const addFolderBtn = document.getElementById('add-folder-btn');
+        const cameraModal = document.getElementById('camera-modal');
+        const cameraView = document.getElementById('camera-view');
+        const cameraCanvas = document.getElementById('camera-canvas');
+        const captureBtn = document.getElementById('capture-btn');
+        const cancelCameraBtn = document.getElementById('cancel-camera-btn');
+        const confirmModal = document.getElementById('confirm-modal');
+        const confirmMessage = document.getElementById('confirm-message');
+        const confirmYes = document.getElementById('confirm-yes');
+        const confirmNo = document.getElementById('confirm-no');
+        const loadingModal = document.getElementById('loading-modal');
+
+        // App-Status
+        let currentFolderId = null; // null ist das Hauptverzeichnis
+        let db;
+
+        // --- WICHTIG: Offline-Funktionalität ---
+        // Die App speichert ALLE Ihre Ordner und Dateien in der IndexedDB Ihres Browsers.
+        // Diese Datenbank funktioniert komplett offline.
+        // Sie müssen die App nur EINMAL laden, wenn Sie eine Internetverbindung haben.
+        // Danach können Sie sie jederzeit öffnen und ohne Internet nutzen.
+        // Die KI-Funktionen (z.B. Dateinamen vorschlagen) benötigen eine Internetverbindung.
+
+        // --- Online-Status-Anzeige ---
+        function updateOnlineStatus() {
+            const isOnline = navigator.onLine;
+            if (isOnline) {
+                statusIndicator.classList.remove('bg-gray-400');
+                statusIndicator.classList.add('bg-green-500');
+                statusIndicator.title = 'Online. KI-Funktionen sind verfügbar.';
+                aiBadge.style.display = 'block';
+            } else {
+                statusIndicator.classList.remove('bg-green-500');
+                statusIndicator.classList.add('bg-gray-400');
+                statusIndicator.title = 'Offline. Die App ist voll nutzbar, KI-Funktionen sind deaktiviert.';
+                aiBadge.style.display = 'none';
+            }
+        }
+
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+
+        // --- Datenbank-Initialisierung (IndexedDB) ---
+        function initDB() {
+            const request = indexedDB.open('AktenOrdnerDB', 1);
+            request.onerror = (event) => console.error("Datenbankfehler:", event.target.errorCode);
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                db.createObjectStore('folders', { keyPath: 'id', autoIncrement: true });
+                db.createObjectStore('files', { keyPath: 'id', autoIncrement: true });
+            };
+            request.onsuccess = (event) => {
+                db = event.target.result;
+                render();
+                updateOnlineStatus(); // Initialen Status setzen
+            };
+        }
+
+        // --- Render-Funktion ---
+        async function render() {
+            if (!db) return;
+            itemContainer.innerHTML = '';
+            const currentFolder = await getFolder(currentFolderId);
+            currentFolderNameEl.textContent = currentFolder ? currentFolder.name : 'Hauptmenü';
+            backBtn.style.visibility = currentFolderId === null ? 'hidden' : 'visible';
+            scanFileBtn.style.display = currentFolderId === null ? 'none' : 'flex';
+            await renderBreadcrumb();
+            const folders = await getItemsFromDB('folders', currentFolderId);
+            folders.forEach(createFolderElement);
+            if (currentFolderId !== null) {
+                const files = await getItemsFromDB('files', currentFolderId);
+                files.forEach(createFileElement);
+            }
+        }
+
+        // --- Breadcrumb-Navigation ---
+        async function renderBreadcrumb() {
+            breadcrumbEl.innerHTML = '';
+            if (currentFolderId === null) return;
+            let path = [];
+            let currentId = currentFolderId;
+            while (currentId !== null) {
+                const folder = await getFolder(currentId);
+                if (folder) {
+                    path.unshift({ id: folder.id, name: folder.name, parentId: folder.parentId });
+                    currentId = folder.parentId;
+                } else { break; }
+            }
+            const homeLink = document.createElement('a');
+            homeLink.href = '#';
+            homeLink.textContent = 'Hauptmenü';
+            homeLink.onclick = (e) => { e.preventDefault(); navigateToFolder(null); };
+            breadcrumbEl.appendChild(homeLink);
+            path.forEach(folder => {
+                breadcrumbEl.append(' / ');
+                const link = document.createElement('a');
+                link.href = '#';
+                link.textContent = folder.name;
+                link.onclick = (e) => { e.preventDefault(); navigateToFolder(folder.id); };
+                breadcrumbEl.appendChild(link);
+            });
+        }
+        
+        // --- Element-Erstellung ---
+        function createFolderElement(folder) {
+            const div = document.createElement('div');
+            div.className = 'item p-2 rounded-lg hover:bg-gray-100 cursor-pointer';
+            div.innerHTML = `
+                <i class="fas fa-folder text-6xl text-yellow-500"></i>
+                <span class="mt-2 text-sm word-break">${folder.name}</span>
+                <div class="delete-btn" data-type="folder" data-id="${folder.id}"><i class="fas fa-times"></i></div>`;
+            div.addEventListener('click', () => navigateToFolder(folder.id));
+            itemContainer.appendChild(div);
+        }
+
+        function createFileElement(file) {
+            const iconClass = file.type.startsWith('image/') ? 'fa-file-image text-blue-500' : 'fa-file-pdf text-red-500';
+            const div = document.createElement('div');
+            div.className = 'item p-2 rounded-lg hover:bg-gray-100 cursor-pointer';
+            div.innerHTML = `
+                <i class="fas ${iconClass} text-6xl"></i>
+                <span class="mt-2 text-sm word-break">${file.name}</span>
+                <div class="delete-btn" data-type="file" data-id="${file.id}"><i class="fas fa-times"></i></div>`;
+            div.addEventListener('click', () => openFile(file.id));
+            itemContainer.appendChild(div);
+        }
+        
+        // --- Navigation & CRUD ---
+        function navigateToFolder(folderId) { currentFolderId = folderId; render(); }
+        backBtn.addEventListener('click', async () => { if (currentFolderId !== null) { const c = await getFolder(currentFolderId); navigateToFolder(c.parentId); } });
+        async function getItemsFromDB(storeName, parentId) {
+            return new Promise((resolve, reject) => {
+                const req = db.transaction(storeName, 'readonly').objectStore(storeName).getAll();
+                req.onsuccess = () => resolve(req.result.filter(item => (storeName === 'folders' ? item.parentId : item.folderId) === parentId));
+                req.onerror = (e) => reject("Fehler: " + e.target.errorCode);
+            });
+        }
+        async function getFolder(folderId) {
+            if (folderId === null) return null;
+            return new Promise((resolve, reject) => {
+                const req = db.transaction('folders', 'readonly').objectStore('folders').get(folderId);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = (e) => reject("Fehler: " + e.target.errorCode);
+            });
+        }
+        addFolderBtn.addEventListener('click', () => {
+            const name = prompt("Wie soll der neue Ordner heißen?");
+            if (name && name.trim() !== '') {
+                const tx = db.transaction('folders', 'readwrite');
+                tx.objectStore('folders').add({ name: name.trim(), parentId: currentFolderId });
+                tx.oncomplete = () => render();
+            }
+        });
+        async function deleteItem(id, type) {
+            showConfirm(async () => {
+                const storeName = type === 'folder' ? 'folders' : 'files';
+                const tx = db.transaction(storeName, 'readwrite');
+                tx.objectStore(storeName).delete(id);
+                if (type === 'folder') await deleteFolderContents(id);
+                tx.oncomplete = () => render();
+            });
+        }
+        async function deleteFolderContents(folderId) {
+            const subFolders = await getItemsFromDB('folders', folderId);
+            for (const f of subFolders) { await deleteFolderContents(f.id); db.transaction('folders', 'readwrite').objectStore('folders').delete(f.id); }
+            const files = await getItemsFromDB('files', folderId);
+            for (const f of files) { db.transaction('files', 'readwrite').objectStore('files').delete(f.id); }
+        }
+        async function openFile(fileId) {
+            const req = db.transaction('files', 'readonly').objectStore('files').get(fileId);
+            req.onsuccess = () => {
+                if (req.result && req.result.data) window.open(URL.createObjectURL(req.result.data), '_blank');
+            };
+        }
+
+        // --- Kamera-Funktionalität ---
+        let cameraStream;
+        scanFileBtn.addEventListener('click', async () => {
+            cameraModal.style.display = 'flex';
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                cameraView.srcObject = cameraStream;
+            } catch (err) {
+                console.error("Kamerafehler:", err);
+                alert("Kamerazugriff fehlgeschlagen.");
+                cameraModal.style.display = 'none';
+            }
+        });
+        cancelCameraBtn.addEventListener('click', () => {
+            cameraModal.style.display = 'none';
+            if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
+        });
+        captureBtn.addEventListener('click', async () => {
+            cameraCanvas.width = cameraView.videoWidth;
+            cameraCanvas.height = cameraView.videoHeight;
+            cameraCanvas.getContext('2d').drawImage(cameraView, 0, 0, cameraCanvas.width, cameraCanvas.height);
+            cancelCameraBtn.click();
+            
+            let suggestedName = '';
+            if (navigator.onLine) {
+                loadingModal.style.display = 'flex';
+                const base64 = cameraCanvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+                try {
+                    suggestedName = await getSuggestedFilename(base64);
+                } catch (error) { console.error("Fehler bei der Gemini-Analyse:", error); }
+                loadingModal.style.display = 'none';
+            }
+            
+            const saveAs = prompt(`Als 'pdf' oder 'foto' speichern? ${!navigator.onLine ? '(Sie sind offline)' : ''}`, "pdf");
+            if (saveAs === 'pdf') saveAsPdf(suggestedName);
+            else if (saveAs === 'foto') saveAsImage(suggestedName);
+        });
+
+        function saveAsImage(suggestedName = '') {
+            const defaultName = suggestedName || `foto-${Date.now()}.jpg`;
+            const fileName = prompt("Dateiname für das Foto:", defaultName);
+            if (!fileName) return;
+            cameraCanvas.toBlob(blob => {
+                const tx = db.transaction('files', 'readwrite');
+                tx.objectStore('files').add({ name: fileName, folderId: currentFolderId, type: 'image/jpeg', data: blob });
+                tx.oncomplete = () => render();
+            }, 'image/jpeg', 0.9);
+        }
+
+        function saveAsPdf(suggestedName = '') {
+            const defaultName = suggestedName || `dokument-${Date.now()}.pdf`;
+            const fileName = prompt("Dateiname für das PDF:", defaultName);
+            if (!fileName) return;
+            const imgData = cameraCanvas.toDataURL('image/jpeg', 1.0);
+            const pdf = new jsPDF({ orientation: cameraCanvas.width > cameraCanvas.height ? 'l' : 'p', unit: 'px', format: [cameraCanvas.width, cameraCanvas.height] });
+            pdf.addImage(imgData, 'JPEG', 0, 0, cameraCanvas.width, cameraCanvas.height);
+            const tx = db.transaction('files', 'readwrite');
+            tx.objectStore('files').add({ name: fileName, folderId: currentFolderId, type: 'application/pdf', data: pdf.output('blob') });
+            tx.oncomplete = () => render();
+        }
+
+        // --- Gemini API Call ---
+        async function getSuggestedFilename(base64ImageData) {
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const today = new Date().toISOString().slice(0, 10);
+            const prompt = `Analysiere dieses Bild eines Dokuments. Schlage einen kurzen, sinnvollen Dateinamen vor im Format: "Typ-Beschreibung-${today}". Beispiele: "Rechnung-Stromwerke-${today}", "Mietvertrag-Wohnung-${today}". Antworte NUR mit dem Dateinamen.`;
+            const payload = { contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: base64ImageData } }] }] };
+            const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!response.ok) throw new Error(`API request failed: ${response.status}`);
+            const result = await response.json();
+            const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+            return text ? text.trim().replace(/[^a-zA-Z0-9-_\.]/g, '_') : "";
+        }
+
+        // --- Event Listener & Modals ---
+        itemContainer.addEventListener('click', (e) => {
+            const btn = e.target.closest('.delete-btn');
+            if (btn) { e.stopPropagation(); deleteItem(parseInt(btn.dataset.id), btn.dataset.type); }
+        });
+        let confirmCallback = null;
+        function showConfirm(callback) { confirmCallback = callback; confirmModal.style.display = 'flex'; }
+        confirmNo.addEventListener('click', () => { confirmModal.style.display = 'none'; confirmCallback = null; });
+        confirmYes.addEventListener('click', () => { if (confirmCallback) confirmCallback(); confirmModal.style.display = 'none'; confirmCallback = null; });
+
+        // App starten
+        initDB();
+    </script>
+</body>
+</html>
