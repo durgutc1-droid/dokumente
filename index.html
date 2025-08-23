@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akten Ordner (Offline)</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#10b981">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .item-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 1.5rem; }
+        .item { display: flex; flex-direction: column; align-items: center; justify-content: start; text-align: center; position: relative; }
+        .item .actions { position: absolute; top: -8px; right: -8px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.2s; }
+        .item:hover .actions { opacity: 1; }
+        .action-btn { background-color: rgba(0,0,0,0.6); color: white; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; }
+        .action-btn.delete { background-color: #ef4444; }
+        .action-btn.print { background-color: #3b82f6; }
+        .action-btn.summary { background-color: #8b5cf6; }
+        .word-break { word-break: break-word; }
+        .loader { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div id="initial-loading-screen" class="fixed inset-0 bg-gray-100 z-[100] flex flex-col items-center justify-center">
+        <div class="loader"></div>
+        <p class="mt-4 text-gray-600">App wird gestartet...</p>
+    </div>
+
+    <div id="app" class="max-w-4xl mx-auto p-4 opacity-0 transition-opacity duration-500">
+        <header class="flex items-center justify-between mb-4">
+            <button id="back-btn" class="p-2 rounded-md hover:bg-gray-200"><i class="fas fa-arrow-left"></i></button>
+            <div class="flex items-center gap-3">
+                <h1 id="current-folder-name" class="text-2xl font-bold">Hauptmenü</h1>
+                <div id="status-indicator" class="w-3 h-3 rounded-full transition-colors" title=""></div>
+            </div>
+            <div class="w-8"></div>
+        </header>
+
+        <nav class="mb-4 text-sm text-gray-500" id="breadcrumb"></nav>
+        <main id="item-container" class="item-grid p-4 bg-white rounded-lg shadow-md min-h-[300px]"></main>
+
+        <div class="fixed bottom-8 right-8 flex flex-col gap-4">
+            <button id="add-folder-btn" class="bg-blue-500 text-white w-16 h-16 rounded-full shadow-lg flex items-center justify-center text-2xl hover:bg-blue-600"><i class="fas fa-folder-plus"></i></button>
+            <button id="scan-file-btn" class="bg-green-500 text-white w-16 h-16 rounded-full shadow-lg flex items-center justify-center text-2xl hover:bg-green-600">
+                <i class="fas fa-camera"></i>
+                <span id="ai-badge" class="absolute top-0 right-0 bg-yellow-400 text-black text-xs font-bold rounded-full px-1.5 py-0.5">✨ KI</span>
+            </button>
+        </div>
+        
+        <footer class="text-center text-xs text-gray-400 mt-4">
+            <p>Alle Daten werden sicher nur auf diesem Gerät gespeichert.</p>
+        </footer>
+    </div>
+
+    <!-- Modals -->
+    <div id="camera-modal" class="fixed inset-0 bg-black bg-opacity-75 hidden flex-col items-center justify-center z-50">
+        <video id="camera-view" class="w-full max-w-lg h-auto" autoplay playsinline></video>
+        <canvas id="camera-canvas" class="hidden"></canvas>
+        <div class="flex gap-4 mt-4">
+            <button id="capture-btn" class="bg-blue-500 text-white px-6 py-3 rounded-full text-lg shadow-lg">Foto machen</button>
+            <button id="cancel-camera-btn" class="bg-gray-500 text-white px-6 py-3 rounded-full text-lg shadow-lg">Abbrechen</button>
+        </div>
+    </div>
+    <div id="confirm-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg shadow-xl text-center">
+            <p id="confirm-message" class="mb-4 text-lg"></p>
+            <div class="flex justify-center gap-4">
+                <button id="confirm-yes" class="bg-red-500 text-white px-6 py-2 rounded-md hover:bg-red-600">Ja</button>
+                <button id="confirm-no" class="bg-gray-300 text-gray-800 px-6 py-2 rounded-md hover:bg-gray-400">Nein</button>
+            </div>
+        </div>
+    </div>
+    <div id="input-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
+            <p id="input-message" class="mb-4 text-lg font-semibold"></p>
+            <input id="input-field" type="text" class="w-full border border-gray-300 p-2 rounded-md mb-4">
+            <div class="flex justify-end gap-4">
+                <button id="input-ok" class="bg-green-500 text-white px-6 py-2 rounded-md hover:bg-green-600">OK</button>
+                <button id="input-cancel" class="bg-gray-300 text-gray-800 px-6 py-2 rounded-md hover:bg-gray-400">Abbrechen</button>
+            </div>
+        </div>
+    </div>
+    <div id="summary-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
+            <h3 class="text-lg font-semibold mb-4">✨ KI-Zusammenfassung</h3>
+            <p id="summary-text" class="mb-4 text-gray-700"></p>
+            <div class="flex justify-end gap-4">
+                 <button id="speak-summary-btn" class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600"><i class="fas fa-volume-up mr-2"></i>Vorlesen</button>
+                <button id="summary-close" class="bg-gray-300 text-gray-800 px-6 py-2 rounded-md hover:bg-gray-400">Schließen</button>
+            </div>
+        </div>
+    </div>
+    <div id="loading-modal" class="fixed inset-0 bg-black bg-opacity-60 hidden items-center justify-center z-[60]">
+        <div class="bg-white p-8 rounded-lg shadow-xl text-center flex flex-col items-center">
+            <div class="loader mb-4"></div>
+            <p class="text-lg font-semibold">✨ Dokument wird analysiert...</p>
+        </div>
+    </div>
+
+    <script src="app.js" defer></script>
+</body>
+</html>
