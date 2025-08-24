@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akten Ordner</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#ffffff">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        #app-loading { display: flex; }
+        #app-container { display: none; }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <div id="app-loading" class="fixed inset-0 flex-col items-center justify-center bg-gray-100 z-50">
+        <svg class="animate-spin h-8 w-8 text-gray-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <p id="loading-text" class="mt-4 text-gray-600">App wird gestartet...</p>
+    </div>
+
+    <div id="app-container" class="max-w-4xl mx-auto p-4">
+        <header class="flex items-center justify-between mb-4">
+            <button id="back-btn" class="p-2 rounded-full hover:bg-gray-200 w-10 h-10 flex items-center justify-center">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <h1 id="current-folder-name" class="text-xl font-bold text-gray-800"></h1>
+            <div class="w-10"></div>
+        </header>
+        <main id="item-container" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-4 p-4 bg-white rounded-lg shadow-sm min-h-[300px]"></main>
+    </div>
+
+    <button id="add-folder-btn" class="fixed bottom-6 right-6 bg-blue-500 text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-2xl hover:bg-blue-600">
+        <i class="fas fa-folder-plus"></i>
+    </button>
+    
+    <div id="input-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-40 p-4">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
+            <p id="input-message" class="mb-4 text-lg font-semibold"></p>
+            <input id="input-field" type="text" class="w-full border border-gray-300 p-2 rounded-md mb-4">
+            <div class="flex justify-end gap-4">
+                <button id="input-ok" class="bg-green-500 text-white px-6 py-2 rounded-md hover:bg-green-600">OK</button>
+                <button id="input-cancel" class="bg-gray-300 text-gray-800 px-6 py-2 rounded-md hover:bg-gray-400">Abbrechen</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        'use strict';
+
+        const dom = {
+            appLoading: document.getElementById('app-loading'),
+            loadingText: document.getElementById('loading-text'),
+            appContainer: document.getElementById('app-container'),
+            backBtn: document.getElementById('back-btn'),
+            currentFolderNameEl: document.getElementById('current-folder-name'),
+            itemContainer: document.getElementById('item-container'),
+            addFolderBtn: document.getElementById('add-folder-btn'),
+            inputModal: document.getElementById('input-modal'),
+            inputMessage: document.getElementById('input-message'),
+            inputField: document.getElementById('input-field'),
+            inputOk: document.getElementById('input-ok'),
+            inputCancel: document.getElementById('input-cancel'),
+        };
+
+        let currentFolderId = null;
+        let db = null;
+
+        function openDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open('AktenOrdnerDB_Final', 1);
+                request.onerror = (e) => reject(`Database error: ${e.target.errorCode}`);
+                request.onupgradeneeded = (e) => {
+                    const dbInstance = e.target.result;
+                    if (!dbInstance.objectStoreNames.contains('folders')) {
+                        const folderStore = dbInstance.createObjectStore('folders', { keyPath: 'id', autoIncrement: true });
+                        folderStore.createIndex('parentId', 'parentId', { unique: false });
+                    }
+                };
+                request.onsuccess = (e) => {
+                    db = e.target.result;
+                    db.onclose = () => { db = null; console.warn("DB connection closed."); };
+                    resolve(db);
+                };
+            });
+        }
+
+        async function getStore(storeName, mode) {
+            if (!db) {
+                console.log("DB not open, reopening...");
+                await openDB();
+            }
+            return db.transaction(storeName, mode).objectStore(storeName);
+        }
+
+        async function render() {
+            try {
+                dom.itemContainer.innerHTML = '';
+                const currentFolder = await getById('folders', currentFolderId);
+                dom.currentFolderNameEl.textContent = currentFolder ? currentFolder.name : 'Hauptmenü';
+                dom.backBtn.style.visibility = currentFolderId === null ? 'hidden' : 'visible';
+                
+                const folders = await getItemsFromDB('folders', 'parentId', currentFolderId);
+                folders.sort((a, b) => a.name.localeCompare(b.name));
+                folders.forEach(createFolderElement);
+            } catch (error) {
+                console.error("Render error:", error);
+            }
+        }
+
+        function createFolderElement(folder) {
+            const div = document.createElement('div');
+            div.className = 'flex flex-col items-center p-2 rounded-lg hover:bg-gray-200 cursor-pointer';
+            div.innerHTML = `<i class="fas fa-folder text-5xl text-yellow-500"></i><span class="mt-2 text-sm text-center break-words">${folder.name}</span>`;
+            div.addEventListener('click', () => navigateToFolder(folder.id));
+            dom.itemContainer.appendChild(div);
+        }
+
+        function navigateToFolder(folderId) {
+            currentFolderId = folderId;
+            render();
+        }
+
+        function showInput(message, defaultValue = "") {
+            return new Promise((resolve) => {
+                dom.inputMessage.textContent = message;
+                dom.inputField.value = defaultValue;
+                dom.inputModal.style.display = 'flex';
+                dom.inputField.focus();
+                const onOk = () => {
+                    const value = dom.inputField.value.trim();
+                    cleanup();
+                    resolve(value || null);
+                };
+                const onCancel = () => {
+                    cleanup();
+                    resolve(null);
+                };
+                const cleanup = () => {
+                    dom.inputOk.removeEventListener('click', onOk);
+                    dom.inputCancel.removeEventListener('click', onCancel);
+                    dom.inputModal.style.display = 'none';
+                };
+                dom.inputOk.addEventListener('click', onOk, { once: true });
+                dom.inputCancel.addEventListener('click', onCancel, { once: true });
+            });
+        }
+
+        async function addItem(storeName, item) {
+            const store = await getStore(storeName, 'readwrite');
+            return new Promise((resolve, reject) => {
+                const req = store.add(item);
+                req.onsuccess = () => resolve();
+                req.onerror = (e) => reject(req.error);
+            });
+        }
+
+        async function getById(storeName, id) {
+            if (id === null) return null;
+            const store = await getStore(storeName, 'readonly');
+            return new Promise((resolve, reject) => {
+                const req = store.get(id);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = (e) => reject(req.error);
+            });
+        }
+
+        async function getItemsFromDB(storeName, indexName, value) {
+            const store = await getStore(storeName, 'readonly');
+            return new Promise((resolve, reject) => {
+                const req = store.index(indexName).getAll(value);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = (e) => reject(req.error);
+            });
+        }
+
+        function setupEventListeners() {
+            dom.backBtn.addEventListener('click', async () => {
+                if (currentFolderId !== null) {
+                    const c = await getById('folders', currentFolderId);
+                    navigateToFolder(c ? c.parentId : null);
+                }
+            });
+
+            dom.addFolderBtn.addEventListener('click', async () => {
+                const name = await showInput("Wie soll der neue Ordner heißen?");
+                if (name) {
+                    try {
+                        await addItem('folders', { name, parentId: currentFolderId });
+                        await render();
+                    } catch (err) {
+                        console.error("Failed to create folder:", err);
+                    }
+                }
+            });
+        }
+
+        async function startApp() {
+            try {
+                await openDB();
+                setupEventListeners();
+                await render();
+                dom.appLoading.style.display = 'none';
+                dom.appContainer.style.display = 'block';
+            } catch (err) {
+                console.error("Failed to initialize the app:", err);
+                dom.loadingText.textContent = 'Fehler beim Starten der App.';
+            }
+        }
+        
+        // The Service Worker registration was causing errors in the execution environment.
+        // It has been removed to ensure the core application functionality works reliably.
+        // The primary offline capability (data storage) is handled by IndexedDB and is not affected.
+        
+        startApp();
+    })();
+    </script>
+</body>
+</html>
