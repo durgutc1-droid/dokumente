@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akten Ordner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 50;
+        }
+        .grid-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            aspect-ratio: 1 / 1;
+            word-break: break-word;
+        }
+        .icon-btn {
+            position: absolute;
+            cursor: pointer;
+            color: #9ca3af;
+            padding: 0.25rem;
+            width: 2rem;
+            height: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .icon-btn:hover { color: #ef4444; }
+        .delete-icon { top: 0.25rem; right: 0.25rem; }
+        .print-icon { bottom: 0.25rem; right: 0.25rem; }
+        .print-icon:hover { color: #3b82f6; }
+    </style>
+</head>
+<body class="bg-slate-100">
+
+    <div id="app" class="flex flex-col h-screen">
+        <!-- Header -->
+        <header class="bg-blue-600 text-white shadow-md p-4 flex items-center justify-between">
+            <button id="back-btn" class="invisible p-2 rounded-full hover:bg-blue-700">
+                <i class="fas fa-arrow-left fa-lg"></i>
+            </button>
+            <h1 id="header-title" class="text-xl font-bold text-center truncate">Hauptmenü</h1>
+            <div class="flex items-center space-x-2">
+                 <button id="import-btn" title="Daten Wiederherstellen" class="p-2 rounded-full hover:bg-blue-700">
+                    <i class="fas fa-upload fa-lg"></i>
+                </button>
+                <button id="export-btn" title="Daten Sichern" class="p-2 rounded-full hover:bg-blue-700">
+                    <i class="fas fa-download fa-lg"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Content Grid -->
+        <main class="flex-grow p-4 overflow-y-auto">
+            <div id="grid-container" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4">
+                <!-- Items will be injected here -->
+            </div>
+            <div id="empty-folder-msg" class="hidden h-full flex items-center justify-center text-slate-500">
+                <p>Dieser Ordner ist leer.</p>
+            </div>
+        </main>
+
+        <!-- Action Buttons -->
+        <div class="fixed bottom-6 right-6 flex flex-col items-end space-y-3">
+             <button id="upload-file-btn" class="hidden bg-green-500 hover:bg-green-600 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg" title="Datei in Ordner hochladen">
+                <i class="fas fa-file-arrow-up fa-lg"></i>
+            </button>
+            <button id="add-folder-btn" class="bg-blue-500 hover:bg-blue-600 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg" title="Neuen Ordner erstellen">
+                <i class="fas fa-folder-plus fa-lg"></i>
+            </button>
+        </div>
+        <input type="file" id="file-upload-input" class="hidden" accept="image/*,.pdf">
+        <input type="file" id="file-import-input" class="hidden" accept=".json">
+
+
+        <!-- Modals -->
+        <div id="add-folder-modal" class="modal-backdrop hidden">
+            <div class="bg-white rounded-lg p-6 shadow-xl w-11/12 max-w-sm">
+                <h2 class="text-lg font-bold mb-4">Neuen Ordner erstellen</h2>
+                <input id="new-folder-name" type="text" class="border rounded-md w-full p-2 mb-4" placeholder="Name des Ordners">
+                <div class="flex justify-end space-x-2">
+                    <button class="modal-cancel bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded-md">Abbrechen</button>
+                    <button id="create-folder-btn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md">Erstellen</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="delete-modal" class="modal-backdrop hidden">
+            <div class="bg-white rounded-lg p-6 shadow-xl w-11/12 max-w-sm text-center">
+                <h2 class="text-lg font-bold mb-2">Wirklich löschen?</h2>
+                <p id="delete-modal-text" class="mb-4 text-slate-600">Möchten Sie das Element wirklich löschen?</p>
+                <div class="flex justify-center space-x-2">
+                    <button class="modal-cancel bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded-md">Nein</button>
+                    <button id="confirm-delete-btn" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md">Ja, löschen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            let state = { folders: [], files: [], currentFolderId: null, itemToDelete: null };
+
+            const CURRENT_YEAR = new Date().getFullYear();
+
+            // --- DOM Elements ---
+            const gridContainer = document.getElementById('grid-container');
+            const headerTitle = document.getElementById('header-title');
+            const backBtn = document.getElementById('back-btn');
+            const addFolderBtn = document.getElementById('add-folder-btn');
+            const uploadFileBtn = document.getElementById('upload-file-btn');
+            const fileUploadInput = document.getElementById('file-upload-input');
+            const fileImportInput = document.getElementById('file-import-input');
+            const emptyFolderMsg = document.getElementById('empty-folder-msg');
+            const exportBtn = document.getElementById('export-btn');
+            const importBtn = document.getElementById('import-btn');
+            const addFolderModal = document.getElementById('add-folder-modal');
+            const newFolderNameInput = document.getElementById('new-folder-name');
+            const createFolderBtn = document.getElementById('create-folder-btn');
+            const deleteModal = document.getElementById('delete-modal');
+            const deleteModalText = document.getElementById('delete-modal-text');
+            const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
+
+            // --- Core Logic ---
+            const generateId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const saveState = () => localStorage.setItem('aktenOrdnerState', JSON.stringify(state));
+
+            const loadState = () => {
+                try {
+                    const savedState = localStorage.getItem('aktenOrdnerState');
+                    if (savedState) {
+                        state = JSON.parse(savedState);
+                    } else {
+                        const steuerFolder = { id: generateId('folder'), name: `Steuererklärung ${CURRENT_YEAR}`, parentId: null };
+                        const mieterFolder = { id: generateId('folder'), name: 'Mieter', parentId: null };
+                        state.folders = [steuerFolder, mieterFolder];
+                        saveState();
+                    }
+                } catch(e) {
+                    console.error("Could not load state from localStorage", e);
+                    state = { folders: [], files: [], currentFolderId: null, itemToDelete: null };
+                }
+            };
+
+            const render = () => {
+                gridContainer.innerHTML = '';
+                const currentParentId = state.currentFolderId;
+                const childFolders = state.folders.filter(f => f.parentId === currentParentId);
+                const childFiles = state.files.filter(f => f.folderId === currentParentId).sort((a,b) => new Date(b.date) - new Date(a.date));
+
+                gridContainer.classList.toggle('hidden', childFolders.length === 0 && childFiles.length === 0);
+                emptyFolderMsg.classList.toggle('hidden', childFolders.length > 0 || childFiles.length > 0);
+
+                childFolders.forEach(folder => {
+                    const folderEl = document.createElement('div');
+                    folderEl.className = 'grid-item bg-white rounded-lg shadow p-2 cursor-pointer text-center';
+                    folderEl.innerHTML = `
+                        <i class="fas fa-folder fa-3x text-yellow-400 pointer-events-none"></i>
+                        <span class="mt-2 text-sm font-medium text-slate-700 pointer-events-none">${folder.name}</span>
+                        <div class="icon-btn delete-icon" data-id="${folder.id}" data-type="folder" title="Löschen"><i class="fas fa-trash-alt"></i></div>`;
+                    folderEl.addEventListener('click', () => { state.currentFolderId = folder.id; render(); });
+                    gridContainer.appendChild(folderEl);
+                });
+
+                childFiles.forEach(file => {
+                    const fileEl = document.createElement('div');
+                    fileEl.className = 'grid-item bg-white rounded-lg shadow p-2 text-center';
+                    const isPdf = file.name.toLowerCase().endsWith('.pdf');
+                    fileEl.innerHTML = `
+                        <i class="fas ${isPdf ? 'fa-file-pdf' : 'fa-file-image'} fa-3x ${isPdf ? 'text-red-500' : 'text-purple-500'}"></i>
+                        <span class="mt-2 text-sm font-medium text-slate-700">${file.name}</span>
+                        <div class="icon-btn delete-icon" data-id="${file.id}" data-type="file" title="Löschen"><i class="fas fa-trash-alt"></i></div>
+                        <div class="icon-btn print-icon" title="Drucken"><i class="fas fa-print"></i></div>`;
+                    gridContainer.appendChild(fileEl);
+                });
+                updateHeader();
+            };
+
+            const updateHeader = () => {
+                if (state.currentFolderId) {
+                    const currentFolder = state.folders.find(f => f.id === state.currentFolderId);
+                    headerTitle.textContent = currentFolder ? currentFolder.name : 'Hauptmenü';
+                    backBtn.classList.remove('invisible');
+                    uploadFileBtn.classList.remove('hidden');
+                } else {
+                    headerTitle.textContent = 'Hauptmenü';
+                    backBtn.classList.add('invisible');
+                    uploadFileBtn.classList.add('hidden');
+                }
+            };
+            
+            const handleFolderDeletion = (folderIdToDelete) => {
+                const foldersToDelete = new Set();
+                
+                function findSubFolders(folderId) {
+                    foldersToDelete.add(folderId);
+                    const children = state.folders.filter(f => f.parentId === folderId);
+                    for (const child of children) {
+                        findSubFolders(child.id);
+                    }
+                }
+
+                findSubFolders(folderIdToDelete);
+                
+                state.files = state.files.filter(file => !foldersToDelete.has(file.folderId));
+                state.folders = state.folders.filter(folder => !foldersToDelete.has(folder.id));
+            };
+
+            const handleExport = () => {
+                const dataStr = JSON.stringify(state, null, 2);
+                const dataBlob = new Blob([dataStr], {type: "application/json"});
+                const url = URL.createObjectURL(dataBlob);
+                const link = document.createElement('a');
+                link.download = 'akten-ordner-backup.json';
+                link.href = url;
+                link.click();
+                URL.revokeObjectURL(url);
+                alert('Sicherungsdatei wurde im Downloads-Ordner gespeichert.');
+            };
+
+            const handleImport = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const importedState = JSON.parse(e.target.result);
+                        if (importedState && Array.isArray(importedState.folders) && Array.isArray(importedState.files)) {
+                            if (confirm('Möchten Sie wirklich alle aktuellen Daten durch den Inhalt der Sicherungsdatei ersetzen?')) {
+                                state = importedState;
+                                state.currentFolderId = null;
+                                saveState();
+                                render();
+                                alert('Daten erfolgreich wiederhergestellt!');
+                            }
+                        } else {
+                            alert('Fehler: Die Datei hat kein gültiges Format.');
+                        }
+                    } catch (error) {
+                        alert('Fehler beim Lesen der Datei. Ist es eine gültige Sicherungsdatei?');
+                    }
+                };
+                reader.readAsText(file);
+                fileImportInput.value = '';
+            };
+
+            // --- Event Listeners ---
+            backBtn.addEventListener('click', () => { if (state.currentFolderId) { const f = state.folders.find(f => f.id === state.currentFolderId); state.currentFolderId = f.parentId; render(); } });
+            addFolderBtn.addEventListener('click', () => addFolderModal.classList.remove('hidden'));
+            createFolderBtn.addEventListener('click', () => { const n = newFolderNameInput.value.trim(); if (n) { state.folders.push({ id: generateId('folder'), name: n, parentId: state.currentFolderId }); newFolderNameInput.value = ''; addFolderModal.classList.add('hidden'); saveState(); render(); } });
+            uploadFileBtn.addEventListener('click', () => fileUploadInput.click());
+            fileUploadInput.addEventListener('change', (e) => { const f = e.target.files[0]; if (f && state.currentFolderId) { const nF = { id: generateId('file'), name: f.name, date: new Date().toISOString(), folderId: state.currentFolderId }; state.files.push(nF); saveState(); render(); } fileUploadInput.value = ''; });
+            
+            gridContainer.addEventListener('click', (e) => {
+                const iconButton = e.target.closest('.icon-btn');
+                if (!iconButton) return;
+                e.stopPropagation();
+                if (iconButton.classList.contains('delete-icon')) {
+                    state.itemToDelete = { id: iconButton.dataset.id, type: iconButton.dataset.type };
+                    deleteModalText.textContent = `Möchten Sie das ${state.itemToDelete.type === 'folder' ? 'Verzeichnis (inkl. Inhalt)' : 'Dokument'} wirklich löschen?`;
+                    deleteModal.classList.remove('hidden');
+                } else if (iconButton.classList.contains('print-icon')) {
+                    alert("Druckfunktion ist in diesem Prototyp nicht implementiert.");
+                }
+            });
+
+            confirmDeleteBtn.addEventListener('click', () => {
+                if (!state.itemToDelete) return;
+                if (state.itemToDelete.type === 'folder') {
+                    handleFolderDeletion(state.itemToDelete.id);
+                } else {
+                    state.files = state.files.filter(f => f.id !== state.itemToDelete.id);
+                }
+                state.itemToDelete = null;
+                deleteModal.classList.add('hidden');
+                saveState();
+                render();
+            });
+
+            document.querySelectorAll('.modal-cancel').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    addFolderModal.classList.add('hidden');
+                    deleteModal.classList.add('hidden');
+                });
+            });
+            
+            exportBtn.addEventListener('click', handleExport);
+            importBtn.addEventListener('click', () => fileImportInput.click());
+            fileImportInput.addEventListener('change', handleImport);
+
+            // --- Initialization ---
+            loadState();
+            render();
+        });
+    </script>
+</body>
+</html>
