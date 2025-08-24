@@ -1,0 +1,17 @@
+{
+  "name": "akten-ordner-webapp",
+  "version": "1.0.0",
+  "description": "Eine intelligente Web-App zur Dokumentenverwaltung mit Gemini-KI.",
+  "private": true,
+  "scripts": {
+    "start": "echo \"Öffnen Sie die index.html direkt im Browser.\""
+  },
+  "keywords": [
+    "react",
+    "gemini",
+    "ai",
+    "document-management"
+  ],
+  "author": "Gemini",
+  "license": "UNLICENSED"
+}
