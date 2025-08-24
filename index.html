@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akten Ordner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 50;
+        }
+        .grid-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            aspect-ratio: 1 / 1;
+            word-break: break-word;
+        }
+        .delete-icon {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            cursor: pointer;
+            color: #9ca3af;
+        }
+        .delete-icon:hover { color: #ef4444; }
+        .print-icon {
+            position: absolute;
+            bottom: 0.5rem;
+            right: 0.5rem;
+            cursor: pointer;
+            color: #9ca3af;
+        }
+        .print-icon:hover { color: #3b82f6; }
+    </style>
+</head>
+<body class="bg-slate-100">
+
+    <div id="app" class="flex flex-col h-screen">
+        <!-- Header -->
+        <header class="bg-blue-600 text-white shadow-md p-4 flex items-center justify-between">
+            <button id="back-btn" class="invisible p-2">
+                <i class="fas fa-arrow-left fa-lg"></i>
+            </button>
+            <h1 id="header-title" class="text-xl font-bold">Hauptmenü</h1>
+            <div class="w-10"></div> <!-- Spacer -->
+        </header>
+
+        <!-- Content Grid -->
+        <main class="flex-grow p-4 overflow-y-auto">
+            <div id="grid-container" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4">
+                <!-- Items will be injected here -->
+            </div>
+            <div id="empty-folder-msg" class="hidden h-full flex items-center justify-center text-slate-500">
+                <p>Dieser Ordner ist leer.</p>
+            </div>
+        </main>
+
+        <!-- Action Buttons -->
+        <div class="fixed bottom-6 right-6 flex flex-col items-end space-y-3">
+             <button id="upload-btn" class="hidden bg-green-500 hover:bg-green-600 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg">
+                <i class="fas fa-upload fa-lg"></i>
+            </button>
+            <button id="add-folder-btn" class="bg-blue-500 hover:bg-blue-600 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg">
+                <i class="fas fa-folder-plus fa-lg"></i>
+            </button>
+        </div>
+        <input type="file" id="file-input" class="hidden" accept="image/*,.pdf">
+
+
+        <!-- Modals -->
+        <div id="add-folder-modal" class="modal-backdrop hidden">
+            <div class="bg-white rounded-lg p-6 shadow-xl w-11/12 max-w-sm">
+                <h2 class="text-lg font-bold mb-4">Neuen Ordner erstellen</h2>
+                <input id="new-folder-name" type="text" class="border rounded-md w-full p-2 mb-4" placeholder="Name des Ordners">
+                <div class="flex justify-end space-x-2">
+                    <button id="cancel-folder-btn" class="bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded-md">Abbrechen</button>
+                    <button id="create-folder-btn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md">Erstellen</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="delete-modal" class="modal-backdrop hidden">
+            <div class="bg-white rounded-lg p-6 shadow-xl w-11/12 max-w-sm text-center">
+                <h2 class="text-lg font-bold mb-2">Wirklich löschen?</h2>
+                <p id="delete-modal-text" class="mb-4 text-slate-600">Möchten Sie das Element wirklich endgültig löschen?</p>
+                <div class="flex justify-center space-x-2">
+                    <button id="cancel-delete-btn" class="bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded-md">Nein</button>
+                    <button id="confirm-delete-btn" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md">Ja, löschen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- STATE MANAGEMENT ---
+            let state = {
+                folders: [],
+                files: [],
+                currentFolderId: null, // null is the root directory
+                itemToDelete: null, // { type: 'folder'/'file', id: '...' }
+            };
+
+            const CURRENT_YEAR = new Date().getFullYear();
+            const MIETER_ADDRESS_KEYWORD = 'Anton-Günther-str.42';
+
+            // --- DOM ELEMENTS ---
+            const gridContainer = document.getElementById('grid-container');
+            const headerTitle = document.getElementById('header-title');
+            const backBtn = document.getElementById('back-btn');
+            const addFolderBtn = document.getElementById('add-folder-btn');
+            const uploadBtn = document.getElementById('upload-btn');
+            const fileInput = document.getElementById('file-input');
+            const emptyFolderMsg = document.getElementById('empty-folder-msg');
+
+            // Modals
+            const addFolderModal = document.getElementById('add-folder-modal');
+            const newFolderNameInput = document.getElementById('new-folder-name');
+            const cancelFolderBtn = document.getElementById('cancel-folder-btn');
+            const createFolderBtn = document.getElementById('create-folder-btn');
+
+            const deleteModal = document.getElementById('delete-modal');
+            const deleteModalText = document.getElementById('delete-modal-text');
+            const cancelDeleteBtn = document.getElementById('cancel-delete-btn');
+            const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
+
+            // --- CORE LOGIC ---
+            const saveState = () => {
+                localStorage.setItem('aktenOrdnerState', JSON.stringify(state));
+            };
+
+            const loadState = () => {
+                const savedState = localStorage.getItem('aktenOrdnerState');
+                if (savedState) {
+                    state = JSON.parse(savedState);
+                } else {
+                    // Initialize with default folders if no state exists
+                    const steuerFolder = { id: `folder_${Date.now()}`, name: `Steuererklärung ${CURRENT_YEAR}`, parentId: null };
+                    const mieterFolder = { id: `folder_${Date.now()+1}`, name: 'Mieter', parentId: null };
+                    state.folders = [steuerFolder, mieterFolder];
+                    saveState();
+                }
+            };
+
+            const render = () => {
+                gridContainer.innerHTML = '';
+                const currentParentId = state.currentFolderId;
+
+                const childFolders = state.folders.filter(f => f.parentId === currentParentId);
+                const childFiles = state.files.filter(f => f.folderId === currentParentId).sort((a,b) => new Date(b.date) - new Date(a.date));
+
+                if (childFolders.length === 0 && childFiles.length === 0) {
+                    emptyFolderMsg.classList.remove('hidden');
+                    gridContainer.classList.add('hidden');
+                } else {
+                    emptyFolderMsg.classList.add('hidden');
+                    gridContainer.classList.remove('hidden');
+                }
+
+                // Render folders
+                childFolders.forEach(folder => {
+                    const folderEl = document.createElement('div');
+                    folderEl.className = 'grid-item bg-white rounded-lg shadow p-2 cursor-pointer text-center';
+                    folderEl.innerHTML = `
+                        <i class="fas fa-folder fa-3x text-yellow-400"></i>
+                        <span class="mt-2 text-sm font-medium text-slate-700">${folder.name}</span>
+                        <div class="delete-icon" data-id="${folder.id}" data-type="folder" title="Löschen">
+                            <i class="fas fa-trash-alt"></i>
+                        </div>
+                    `;
+                    folderEl.addEventListener('click', () => {
+                        state.currentFolderId = folder.id;
+                        render();
+                    });
+                    gridContainer.appendChild(folderEl);
+                });
+
+                // Render files
+                childFiles.forEach(file => {
+                    const fileEl = document.createElement('div');
+                    fileEl.className = 'grid-item bg-white rounded-lg shadow p-2 text-center';
+                    const isPdf = file.name.toLowerCase().endsWith('.pdf');
+                    fileEl.innerHTML = `
+                        <i class="fas ${isPdf ? 'fa-file-pdf' : 'fa-file-image'} fa-3x ${isPdf ? 'text-red-500' : 'text-purple-500'}"></i>
+                        <span class="mt-2 text-sm font-medium text-slate-700">${file.name}</span>
+                        <div class="delete-icon" data-id="${file.id}" data-type="file" title="Löschen">
+                            <i class="fas fa-trash-alt"></i>
+                        </div>
+                        <div class="print-icon" title="Drucken">
+                            <i class="fas fa-print"></i>
+                        </div>
+                    `;
+                    gridContainer.appendChild(fileEl);
+                });
+
+                updateHeader();
+            };
+
+            const updateHeader = () => {
+                if (state.currentFolderId) {
+                    const currentFolder = state.folders.find(f => f.id === state.currentFolderId);
+                    headerTitle.textContent = currentFolder.name;
+                    backBtn.classList.remove('invisible');
+                    uploadBtn.classList.remove('hidden');
+                } else {
+                    headerTitle.textContent = 'Hauptmenü';
+                    backBtn.classList.add('invisible');
+                    uploadBtn.classList.add('hidden');
+                }
+            };
+            
+            const handleAutomation = (file) => {
+                const fileDate = new Date(file.date);
+                const fileYear = fileDate.getFullYear();
+
+                // 1. Mieter-Automation (filename-based)
+                if (file.name.toLowerCase().includes(MIETER_ADDRESS_KEYWORD.toLowerCase().replace(/\s/g, ''))) {
+                    const mieterFolder = state.folders.find(f => f.name === 'Mieter' && f.parentId === null);
+                    if (mieterFolder) {
+                        state.files.push({ ...file, id: `file_${Date.now()+1}`, folderId: mieterFolder.id });
+                    }
+                }
+
+                // 2. Steuer-Automation (based on year)
+                // In a real app, you'd have a checkbox for "steuerrelevant"
+                let steuerOrdnerName = `Steuererklärung ${fileYear}`;
+                let steuerFolder = state.folders.find(f => f.name === steuerOrdnerName && f.parentId === null);
+
+                if (!steuerFolder) {
+                    steuerFolder = { id: `folder_${Date.now()+2}`, name: steuerOrdnerName, parentId: null };
+                    state.folders.push(steuerFolder);
+                }
+                state.files.push({ ...file, id: `file_${Date.now()+3}`, folderId: steuerFolder.id });
+            };
+
+
+            // --- EVENT LISTENERS ---
+            backBtn.addEventListener('click', () => {
+                if (state.currentFolderId) {
+                    const currentFolder = state.folders.find(f => f.id === state.currentFolderId);
+                    state.currentFolderId = currentFolder.parentId;
+                    render();
+                }
+            });
+
+            addFolderBtn.addEventListener('click', () => addFolderModal.classList.remove('hidden'));
+            cancelFolderBtn.addEventListener('click', () => addFolderModal.classList.add('hidden'));
+            createFolderBtn.addEventListener('click', () => {
+                const name = newFolderNameInput.value.trim();
+                if (name) {
+                    state.folders.push({
+                        id: `folder_${Date.now()}`,
+                        name: name,
+                        parentId: state.currentFolderId
+                    });
+                    newFolderNameInput.value = '';
+                    addFolderModal.classList.add('hidden');
+                    saveState();
+                    render();
+                }
+            });
+            
+            uploadBtn.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', (event) => {
+                const uploadedFile = event.target.files[0];
+                if (uploadedFile && state.currentFolderId) {
+                    const newFile = {
+                        id: `file_${Date.now()}`,
+                        name: uploadedFile.name,
+                        date: new Date().toISOString(),
+                        folderId: state.currentFolderId
+                    };
+                    state.files.push(newFile);
+                    handleAutomation(newFile);
+                    saveState();
+                    render();
+                }
+                fileInput.value = ''; // Reset for next upload
+            });
+
+            gridContainer.addEventListener('click', (e) => {
+                const target = e.target.closest('.delete-icon, .print-icon');
+                if (!target) return;
+                
+                if (target.classList.contains('delete-icon')) {
+                    state.itemToDelete = {
+                        id: target.dataset.id,
+                        type: target.dataset.type
+                    };
+                    deleteModalText.textContent = `Möchten Sie das ${state.itemToDelete.type === 'folder' ? 'Verzeichnis' : 'Dokument'} wirklich löschen?`
+                    deleteModal.classList.remove('hidden');
+                }
+                if (target.classList.contains('print-icon')) {
+                    alert("In einer echten App würde jetzt der Druckdialog geöffnet.");
+                    // window.print(); // This would print the whole page
+                }
+            });
+
+            cancelDeleteBtn.addEventListener('click', () => deleteModal.classList.add('hidden'));
+            confirmDeleteBtn.addEventListener('click', () => {
+                if (state.itemToDelete) {
+                    if (state.itemToDelete.type === 'folder') {
+                        // Simple delete, doesn't handle sub-folders for this prototype
+                        state.folders = state.folders.filter(f => f.id !== state.itemToDelete.id);
+                    } else {
+                        state.files = state.files.filter(f => f.id !== state.itemToDelete.id);
+                    }
+                    state.itemToDelete = null;
+                    deleteModal.classList.add('hidden');
+                    saveState();
+                    render();
+                }
+            });
+
+
+            // --- INITIALIZATION ---
+            loadState();
+            render();
+        });
+    </script>
+</body>
+</html>
