@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akten Ordner</title>
+    <meta name="theme-color" content="#3B82F6"/>
+    <link rel="manifest" href="data:application/manifest+json,{
+        &quot;name&quot;: &quot;Akten Ordner&quot;,
+        &quot;short_name&quot;: &quot;Akten&quot;,
+        &quot;start_url&quot;: &quot;.&quot;,
+        &quot;display&quot;: &quot;standalone&quot;,
+        &quot;background_color&quot;: &quot;#F1F5F9&quot;,
+        &quot;theme_color&quot;: &quot;#3B82F6&quot;,
+        &quot;description&quot;: &quot;Eine App zur Verwaltung Ihrer Dokumente.&quot;,
+        &quot;icons&quot;: [{
+            &quot;src&quot;: &quot;https://www.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png&quot;,
+            &quot;sizes&quot;: &quot;48x48&quot;,
+            &quot;type&quot;: &quot;image/png&quot;
+        }, {
+            &quot;src&quot;: &quot;https://www.gstatic.com/images/branding/product/1x/drive_2020q4_96dp.png&quot;,
+            &quot;sizes&quot;: &quot;96x96&quot;,
+            &quot;type&quot;: &quot;image/png&quot;
+        }, {
+            &quot;src&quot;: &quot;https://www.gstatic.com/images/branding/product/2x/drive_2020q4_192dp.png&quot;,
+            &quot;sizes&quot;: &quot;192x192&quot;,
+            &quot;type&quot;: &quot;image/png&quot;
+        }, {
+            &quot;src&quot;: &quot;https://ssl.gstatic.com/images/branding/product/2x/drive_2020q4_512dp.png&quot;,
+            &quot;sizes&quot;: &quot;512x512&quot;,
+            &quot;type&quot;: &quot;image/png&quot;
+        }]
+    }">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React Libraries -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel Compiler -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- JSZip Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- PDF.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .modal-backdrop { z-index: 50; }
+        .grid-item { aspect-ratio: 1 / 1; }
+        .icon-btn { width: 2rem; height: 2rem; }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #09f;
+            animation: spin 1s ease infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-slate-100">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useRef } = React;
+
+        // --- CONSTANTS ---
+        const MEDIA_FOLDER_ID = 'media_folder_id_#_static';
+        if (typeof pdfjsLib !== 'undefined') {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
+        }
+
+
+        // --- ICONS (as SVG components) ---
+        const FolderIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FFC107" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>;
+        const PdfFileIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#F44336" strokeWidth="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>;
+        const ImageFileIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>;
+        const VideoFileIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#2196F3" strokeWidth="1.5"><rect x="2" y="7" width="20" height="10" rx="2" ry="2"></rect><line x1="2" y1="12" x2="22" y2="12"></line><line x1="7" y1="7" x2="7" y2="17"></line><line x1="17" y1="7" x2="17" y2="17"></line></svg>;
+        const AudioFileIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#4CAF50" strokeWidth="1.5"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>;
+        const DeleteIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>;
+        const ShareIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M15 8a3 3 0 10-2.977-2.63l-4.94 2.47a3 3 0 100 4.319l4.94 2.47a3 3 0 10.895-1.789l-4.94-2.47a3.027 3.027 0 000-.74l4.94-2.47C13.456 7.68 14.19 8 15 8z" /></svg>;
+        const SparklesIcon = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" className={className || "h-5 w-5"} viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 2a1 1 0 00-1 1v1.586l-1.293 1.293a1 1 0 001.414 1.414L5 6.414V8a1 1 0 002 0V6.414l.293.293a1 1 0 001.414-1.414L7.414 4.586V3a1 1 0 00-1-1H5zM10 8a1 1 0 00-1 1v1.586l-1.293 1.293a1 1 0 101.414 1.414L10 12.414V14a1 1 0 102 0v-1.586l.293.293a1 1 0 101.414-1.414L12.414 10.586V9a1 1 0 00-1-1h-1zM15 2a1 1 0 00-1 1v1.586l-1.293 1.293a1 1 0 101.414 1.414L15 6.414V8a1 1 0 102 0V6.414l.293.293a1 1 0 101.414-1.414L17.414 4.586V3a1 1 0 00-1-1h-1z" clipRule="evenodd" /></svg>;
+        const TrashIcon = () => <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>;
+        const SearchIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>;
+
+        const generateId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        const getDb = () => {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open("AktenOrdnerPWA_DB", 1);
+                request.onerror = (event) => reject("IndexedDB error: " + event.target.errorCode);
+                request.onsuccess = (event) => resolve(event.target.result);
+                request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    if (!db.objectStoreNames.contains('fileContents')) {
+                        db.createObjectStore('fileContents', { keyPath: 'id' });
+                    }
+                };
+            });
+        };
+
+        const fileStore = {
+            async get(key) {
+                const db = await getDb();
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction('fileContents', 'readonly');
+                    const store = tx.objectStore('fileContents');
+                    const request = store.get(key);
+                    request.onsuccess = () => resolve(request.result?.blob);
+                    request.onerror = (event) => reject("Get request error: " + event.target.error);
+                    tx.oncomplete = () => db.close();
+                });
+            },
+            async set(key, val) {
+                const db = await getDb();
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction('fileContents', 'readwrite');
+                    const store = tx.objectStore('fileContents');
+                    const request = store.put({ id: key, blob: val });
+                    request.onsuccess = () => resolve();
+                    request.onerror = (event) => reject("Set request error: " + event.target.error);
+                    tx.oncomplete = () => db.close();
+                    tx.onerror = (event) => reject("Transaction error: " + event.target.error);
+                });
+            },
+            async delete(key) {
+                const db = await getDb();
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction('fileContents', 'readwrite');
+                    const store = tx.objectStore('fileContents');
+                    const request = store.delete(key);
+                    request.onsuccess = () => resolve();
+                    request.onerror = (event) => reject("Delete request error: " + event.target.error);
+                    tx.oncomplete = () => db.close();
+                    tx.onerror = (event) => reject("Transaction error: " + event.target.error);
+                });
+            },
+        };
+
+
+        function App() {
+            const [folders, setFolders] = useState([]);
+            const [files, setFiles] = useState([]);
+            const [trash, setTrash] = useState([]);
+            const [currentFolderId, setCurrentFolderId] = useState(null);
+            const [viewMode, setViewMode] = useState('browse');
+            const [modal, setModal] = useState({ type: null, data: null });
+            const [isLoading, setIsLoading] = useState(false);
+            const [loadingMessage, setLoadingMessage] = useState('');
+            const [searchQuery, setSearchQuery] = useState('');
+            const [searchResults, setSearchResults] = useState({ folders: [], files: [] });
+
+            useEffect(() => {
+                try {
+                    const savedState = localStorage.getItem('aktenOrdnerState_PWA');
+                    if (savedState) {
+                        const { folders, files, trash } = JSON.parse(savedState);
+                        setFolders(folders || []);
+                        setFiles(files || []);
+                        setTrash(trash || []);
+                    } else {
+                        const CURRENT_YEAR = new Date().getFullYear();
+                        setFolders([
+                            { id: MEDIA_FOLDER_ID, name: 'Medien', parentId: null },
+                            { id: generateId('folder'), name: `Steuererklärung ${CURRENT_YEAR}`, parentId: null },
+                            { id: generateId('folder'), name: 'Mieter', parentId: null },
+                        ]);
+                    }
+                } catch (error) { console.error("Failed to load state:", error); }
+            }, []);
+
+            useEffect(() => {
+                try {
+                    localStorage.setItem('aktenOrdnerState_PWA', JSON.stringify({ folders, files, trash }));
+                } catch (error) { console.error("Failed to save state:", error); }
+            }, [folders, files, trash]);
+
+            const handleAddFolder = (name) => {
+                if (!name.trim()) return;
+                setFolders(prev => [...prev, { id: generateId('folder'), name, parentId: currentFolderId }]);
+                setModal({ type: null, data: null });
+            };
+
+            const handleFileUpload = (uploadedFile) => {
+                if (!uploadedFile || !currentFolderId) return;
+                const simulatedContent = `RECHNUNG\nFirma Handwerker GmbH\nRechnungsnummer: 2025-08-15\nFällig bis: 30.08.2025\nBetrag: 123.45 EUR\nReparatur des Wasserhahns.`;
+                setModal({ type: 'processFile', data: { originalFile: uploadedFile, content: simulatedContent } });
+            };
+            
+            const handleSaveProcessedFile = async ({ fileName, folderName, originalFile }) => {
+                let targetFolder = folders.find(f => f.name.toLowerCase() === folderName.toLowerCase() && f.parentId === null);
+                if (!targetFolder) {
+                    targetFolder = { id: generateId('folder'), name: folderName, parentId: null };
+                    setFolders(prev => [...prev, targetFolder]);
+                }
+                const newFile = { id: generateId('file'), name: fileName, date: new Date().toISOString(), folderId: targetFolder.id };
+                
+                try {
+                    await fileStore.set(newFile.id, originalFile);
+                    setFiles(prev => [...prev, newFile]);
+                    setModal({ type: null, data: null });
+                } catch (error) {
+                    console.error("Failed to save file blob:", error);
+                    setModal({ type: 'info', data: { message: "Datei konnte nicht im Browser gespeichert werden." } });
+                }
+            };
+
+            const handleDeleteRequest = (item) => {
+                if (item.type === 'folder') {
+                    setModal({ type: 'confirmPermanentDeleteFolder', data: item });
+                } else {
+                    setModal({ type: 'confirmMoveFileToTrash', data: item });
+                }
+            };
+            
+            const handleMoveFileToTrash = () => {
+                if (!modal.data) return;
+                const { id } = modal.data;
+                const fileToTrash = files.find(f => f.id === id);
+                if (fileToTrash) {
+                    const deletedAt = new Date().toISOString();
+                    setTrash(prev => [...prev, { item: fileToTrash, type: 'file', deletedAt }]);
+                    setFiles(prev => prev.filter(f => f.id !== id));
+                }
+                setModal({ type: null, data: null });
+            };
+
+            const handlePermanentDeleteFolder = async () => {
+                if (!modal.data) return;
+                const { id: folderId } = modal.data;
+                
+                if (folderId === MEDIA_FOLDER_ID) {
+                    setModal({ type: 'info', data: { message: "Der Medien-Ordner kann nicht gelöscht werden." } });
+                    return;
+                }
+
+                const foldersToDelete = new Set([folderId]);
+                let changed = true;
+                while (changed) {
+                    changed = false;
+                    const currentSize = foldersToDelete.size;
+                    folders.forEach(f => {
+                        if (f.parentId && foldersToDelete.has(f.parentId)) {
+                            foldersToDelete.add(f.id);
+                        }
+                    });
+                    if (foldersToDelete.size > currentSize) changed = true;
+                }
+
+                const filesInDeletedFolders = files.filter(file => foldersToDelete.has(file.folderId));
+                const deletePromises = filesInDeletedFolders.map(file => fileStore.delete(file.id));
+
+                try {
+                    await Promise.all(deletePromises);
+                    setFiles(prev => prev.filter(file => !foldersToDelete.has(file.folderId)));
+                    setFolders(prev => prev.filter(folder => !foldersToDelete.has(folder.id)));
+                } catch (error) {
+                    console.error("Error permanently deleting folder contents:", error);
+                    setModal({ type: 'info', data: { message: "Fehler beim Löschen des Ordnerinhalts." } });
+                }
+                setModal({ type: null, data: null });
+            };
+
+
+            const handlePermanentDeleteFromTrash = async (itemToDelete) => {
+                const { item } = itemToDelete;
+                try {
+                    await fileStore.delete(item.id);
+                    setTrash(prev => prev.filter(t => t.item.id !== item.id));
+                } catch (error) { console.error("Could not delete file blob from trash:", error); }
+            };
+
+            const handleEmptyTrashRequest = () => {
+                 setModal({ type: 'confirmEmptyTrash' });
+            };
+            
+            const handleExecuteEmptyTrash = async () => {
+                const deletePromises = trash.map(trashedItem => fileStore.delete(trashedItem.item.id));
+                setIsLoading(true);
+                setLoadingMessage("Papierkorb wird geleert...");
+                try {
+                    await Promise.all(deletePromises);
+                    setTrash([]);
+                    setModal({ type: 'info', data: { message: "Papierkorb wurde geleert." } });
+                } catch(error) {
+                    console.error("Error emptying trash", error);
+                    setModal({ type: 'info', data: { message: "Fehler beim Leeren des Papierkorbs." } });
+                } finally {
+                    setIsLoading(false);
+                    setLoadingMessage("");
+                }
+            };
+
+            const handleRestore = (itemToRestore) => {
+                const { item, type } = itemToRestore;
+                if (type === 'file') {
+                    setFiles(prev => [...prev, item]);
+                }
+                setTrash(prev => prev.filter(t => t.item.id !== item.id));
+            };
+
+            const handleExport = async () => {
+                if (typeof JSZip === 'undefined') {
+                    setModal({ type: 'info', data: { message: 'Export-Bibliothek konnte nicht geladen werden. Bitte Internetverbindung prüfen.' } });
+                    return;
+                }
+                setIsLoading(true);
+                setLoadingMessage('Backup wird erstellt...');
+                try {
+                    const zip = new JSZip();
+                    const metadata = { folders, files, trash };
+                    zip.file("metadata.json", JSON.stringify(metadata, null, 2));
+                    const dataFolder = zip.folder("data");
+                    for (const [index, file] of files.entries()) {
+                        setLoadingMessage(`Verpacke Datei ${index + 1} von ${files.length}...`);
+                        const blob = await fileStore.get(file.id);
+                        if (blob) {
+                            dataFolder.file(file.id, blob);
+                        }
+                    }
+                    setLoadingMessage('ZIP-Datei wird generiert...');
+                    const zipBlob = await zip.generateAsync({ type: "blob" });
+                    const url = URL.createObjectURL(zipBlob);
+                    const backupName = `akten-ordner-backup-${new Date().toISOString().slice(0, 10)}.zip`;
+                    setModal({ type: 'exportReady', data: { backupName, blobUrl: url } });
+
+                } catch (error) {
+                    console.error("Export failed:", error);
+                    setModal({ type: 'info', data: { message: 'Daten-Export fehlgeschlagen.' } });
+                } finally {
+                    setIsLoading(false);
+                    setLoadingMessage('');
+                }
+            };
+
+            const handleImport = (event) => {
+                if (typeof JSZip === 'undefined') {
+                    setModal({ type: 'info', data: { message: 'Import-Bibliothek konnte nicht geladen werden. Bitte Internetverbindung prüfen.' } });
+                    return;
+                }
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    setIsLoading(true);
+                    setLoadingMessage('Backup wird importiert...');
+                    try {
+                        const zip = await JSZip.loadAsync(e.target.result);
+                        const metadataFile = zip.file("metadata.json");
+                        if (!metadataFile) throw new Error("Ungültige Backup-Datei: metadata.json nicht gefunden.");
+                        
+                        const metadataContent = await metadataFile.async("string");
+                        const metadata = JSON.parse(metadataContent);
+                        
+                        if (!metadata.folders || !metadata.files) throw new Error("Ungültiges Format der Metadaten in der Backup-Datei.");
+
+                        const dataFolder = zip.folder("data");
+                        for (const [index, fileInfo] of metadata.files.entries()) {
+                            setLoadingMessage(`Stelle Datei ${index + 1} von ${metadata.files.length} wieder her...`);
+                            const fileInZip = dataFolder.file(fileInfo.id);
+                            if (fileInZip) {
+                                const blob = await fileInZip.async("blob");
+                                await fileStore.set(fileInfo.id, blob);
+                            }
+                        }
+                        
+                        setFolders(metadata.folders);
+                        setFiles(metadata.files);
+                        setTrash(metadata.trash || []);
+                        
+                        setModal({ type: 'info', data: { message: "Daten erfolgreich wiederhergestellt!" } });
+                    } catch (error) {
+                        console.error("Import failed:", error);
+                        setModal({ type: 'info', data: { message: `Daten-Import fehlgeschlagen: ${error.message}` } });
+                    } finally {
+                       event.target.value = null;
+                       setIsLoading(false);
+                       setLoadingMessage('');
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            };
+
+            const handleFileClick = async (file) => {
+                try {
+                    const blob = await fileStore.get(file.id);
+                    if (blob) {
+                        const url = URL.createObjectURL(blob);
+                        setModal({ type: 'previewFile', data: { file, blobUrl: url } });
+                    } else {
+                        setModal({ type: 'info', data: { message: "Dateiinhalt nicht gefunden. Möglicherweise wurden die Browser-Daten gelöscht." } });
+                    }
+                } catch (error) {
+                    console.error("Could not open or download file:", error);
+                    setModal({ type: 'info', data: { message: "Datei konnte nicht geöffnet werden." } });
+                }
+            };
+            
+            const handleShare = async (file) => {
+                try {
+                    const blob = await fileStore.get(file.id);
+                    if (!blob) {
+                        setModal({ type: 'info', data: { message: "Dateiinhalt nicht gefunden." } });
+                        return;
+                    }
+
+                    const shareFile = new File([blob], file.name, { type: blob.type });
+
+                    if (navigator.share && navigator.canShare && navigator.canShare({ files: [shareFile] })) {
+                        await navigator.share({
+                            files: [shareFile],
+                            title: file.name,
+                            text: `Hier ist die Datei: ${file.name}`,
+                        });
+                    } else {
+                        const blobUrl = URL.createObjectURL(blob);
+                        setModal({ type: 'share', data: { file, blobUrl } });
+                    }
+                } catch (error) {
+                    if (error.name !== 'AbortError') { // User cancellation is not an error
+                        console.error('Share failed:', error);
+                        setModal({ type: 'info', data: { message: `Teilen fehlgeschlagen: ${error.message}` } });
+                    }
+                }
+            };
+
+            const handleAiSearch = async () => {
+                if (!searchQuery.trim()) return;
+                setIsLoading(true);
+                setLoadingMessage('KI-Suche läuft...');
+                try {
+                    const fileSystemData = JSON.stringify({
+                        files: files.map(f => ({ id: f.id, name: f.name, type: 'file', folderId: f.folderId })),
+                        folders: folders.map(f => ({ id: f.id, name: f.name, type: 'folder', parentId: f.parentId }))
+                    });
+
+                    const prompt = `Du bist ein intelligenter Dateisystem-Assistent. Finde Dateien und Ordner basierend auf der Anfrage des Benutzers. Analysiere die bereitgestellte JSON-Liste von Dateien und Ordnern und die Anfrage des Benutzers. Gib ein JSON-Array mit Objekten zurück, wobei jedes Objekt ein relevantes Element darstellt und eine 'id' und einen 'type' ('file' oder 'folder') hat. Berücksichtige Daten, Themen und den implizierten Kontext. Das heutige Datum ist ${new Date().toLocaleDateString('de-DE')}. Antworte nur mit dem JSON-Objekt. Anfrage: "${searchQuery}". Dateisystem-Daten: ${fileSystemData}`;
+                    
+                    const schema = {
+                      type: "OBJECT",
+                      properties: {
+                        results: {
+                          type: "ARRAY",
+                          items: {
+                            type: "OBJECT",
+                            properties: {
+                              id: { type: "STRING" },
+                              type: { type: "STRING" }
+                            },
+                            required: ["id", "type"]
+                          }
+                        }
+                      },
+                      required: ["results"]
+                    };
+
+                    const apiKey = "";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+                    const payload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json", responseSchema: schema } };
+
+                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    if (!response.ok) throw new Error(`API-Fehler: ${response.statusText}`);
+                    
+                    const result = await response.json();
+                    const jsonText = result.candidates[0].content.parts[0].text;
+                    const parsedJson = JSON.parse(jsonText);
+
+                    const resultIds = new Set(parsedJson.results.map(r => r.id));
+                    const foundFiles = files.filter(f => resultIds.has(f.id));
+                    const foundFolders = folders.filter(f => resultIds.has(f.id));
+                    
+                    setSearchResults({ files: foundFiles, folders: foundFolders });
+                    setViewMode('search');
+
+                } catch (err) {
+                    console.error("Fehler bei der KI-Suche:", err);
+                    setModal({ type: 'info', data: { message: "Die KI-Suche ist fehlgeschlagen." } });
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+            
+            const handleBack = () => {
+                if (viewMode === 'trash' || viewMode === 'search') {
+                    setViewMode('browse');
+                    setSearchQuery('');
+                } else if (currentFolderId) {
+                    const currentFolder = folders.find(f => f.id === currentFolderId);
+                    setCurrentFolderId(currentFolder?.parentId ?? null);
+                }
+            };
+
+            let currentView;
+            switch(viewMode) {
+                case 'search':
+                    currentView = <MainContent folders={searchResults.folders} files={searchResults.files} onFolderClick={setCurrentFolderId} onFileClick={handleFileClick} onDeleteClick={handleDeleteRequest} onShareClick={handleShare} isSearchResult={true} />;
+                    break;
+                case 'trash':
+                     currentView = <TrashView trashItems={trash} onRestore={handleRestore} onDelete={handlePermanentDeleteFromTrash} onEmptyTrash={handleEmptyTrashRequest} />;
+                     break;
+                case 'browse':
+                default:
+                    const childFolders = folders.filter(f => f.parentId === currentFolderId);
+                    const childFiles = files.filter(f => f.folderId === currentFolderId).sort((a, b) => new Date(b.date) - new Date(a.date));
+                    currentView = <MainContent folders={childFolders} files={childFiles} onFolderClick={setCurrentFolderId} onFileClick={handleFileClick} onDeleteClick={handleDeleteRequest} onShareClick={handleShare} />;
+                    break;
+            }
+
+            const currentFolder = folders.find(f => f.id === currentFolderId);
+            const isMediaFolder = currentFolderId === MEDIA_FOLDER_ID;
+
+            return (
+                <div className="flex flex-col h-screen bg-slate-100 font-sans">
+                    <Header
+                        viewMode={viewMode}
+                        currentFolder={currentFolder}
+                        onBack={handleBack}
+                        onShowTrash={() => { setViewMode('trash'); setCurrentFolderId(null); }}
+                        onImport={handleImport}
+                        onExport={handleExport}
+                        onSummarize={() => setModal({ type: 'summarize', data: { folderName: currentFolder.name, files: files.filter(f => f.folderId === currentFolderId) }})}
+                        searchQuery={searchQuery}
+                        setSearchQuery={setSearchQuery}
+                        onSearch={handleAiSearch}
+                    />
+                    {currentView}
+                    {viewMode === 'browse' && (
+                        <ActionButtons
+                            currentFolderId={currentFolderId}
+                            isMediaFolder={isMediaFolder}
+                            onAddFolderClick={() => setModal({ type: 'addFolder', data: null })}
+                            onFileUpload={handleFileUpload}
+                        />
+                    )}
+                    {isLoading && <LoadingModal message={loadingMessage} />}
+                    {modal.type === 'addFolder' && <AddFolderModal onAdd={handleAddFolder} onCancel={() => setModal({ type: null, data: null })} />}
+                    {modal.type === 'confirmMoveFileToTrash' && <ConfirmMoveToTrashModal onDelete={handleMoveFileToTrash} onCancel={() => setModal({ type: null, data: null })} />}
+                    {modal.type === 'confirmPermanentDeleteFolder' && <ConfirmPermanentDeleteFolderModal onDelete={handlePermanentDeleteFolder} onCancel={() => setModal({ type: null, data: null })} />}
+                    {modal.type === 'confirmEmptyTrash' && <ConfirmEmptyTrashModal onConfirm={handleExecuteEmptyTrash} onCancel={() => setModal({ type: null, data: null })} />}
+                    {modal.type === 'processFile' && <FileProcessingModal data={modal.data} onSave={handleSaveProcessedFile} onCancel={() => setModal({ type: null, data: null })} existingFolders={folders.filter(f => f.parentId === null)}/>}
+                    {modal.type === 'summarize' && <SummaryModal data={modal.data} onCancel={() => setModal({ type: null, data: null })} />}
+                    {modal.type === 'info' && <InfoModal message={modal.data.message} onOk={() => setModal({ type: null, data: null })} />}
+                    {modal.type === 'previewFile' && <PreviewModal file={modal.data.file} blobUrl={modal.data.blobUrl} onCancel={() => setModal({ type: null, data: null })} />}
+                    {modal.type === 'exportReady' && <ExportReadyModal backupName={modal.data.backupName} blobUrl={modal.data.blobUrl} onCancel={() => setModal({ type: null, data: null })} />}
+                    {modal.type === 'share' && <ShareModal file={modal.data.file} blobUrl={modal.data.blobUrl} onCancel={() => setModal({ type: null, data: null })} />}
+                </div>
+            );
+        }
+
+        function Header({ viewMode, currentFolder, onBack, onShowTrash, onImport, onExport, onSummarize, searchQuery, setSearchQuery, onSearch }) {
+            const showBackButton = viewMode === 'trash' || viewMode === 'search' || !!currentFolder;
+            
+            let title;
+            if (viewMode === 'trash') title = 'Papierkorb';
+            else if (viewMode === 'search') title = 'Suchergebnisse';
+            else title = currentFolder?.name || 'Hauptmenü';
+            
+            return (
+                <header className="bg-blue-600 text-white shadow-md p-2 sm:p-4 flex flex-col sm:flex-row items-center justify-between">
+                    <div className="flex items-center justify-between w-full sm:w-auto">
+                        <div className="flex items-center space-x-2">
+                             <button onClick={onShowTrash} title="Papierkorb" className="p-2 rounded-full hover:bg-blue-700">
+                                <TrashIcon />
+                            </button>
+                            <button onClick={onBack} className={`p-2 rounded-full hover:bg-blue-700 ${!showBackButton ? 'invisible' : ''}`}>
+                                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                            </button>
+                        </div>
+                        <h1 className="text-xl font-bold text-center truncate sm:hidden flex-1 mx-2">{title}</h1>
+                        <div className="flex items-center sm:hidden">
+                            <label htmlFor="import-input-mobile" className="p-2 rounded-full hover:bg-blue-700 cursor-pointer" title="Daten Wiederherstellen"><svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg></label>
+                            <input type="file" id="import-input-mobile" className="hidden" accept=".zip" onChange={onImport} />
+                            <button onClick={onExport} title="Daten Sichern" className="p-2 rounded-full hover:bg-blue-700"><svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg></button>
+                        </div>
+                    </div>
+                    <h1 className="hidden sm:block text-xl font-bold text-center truncate flex-1 mx-4">{title}</h1>
+                     <div className="flex items-center mt-2 sm:mt-0 w-full sm:w-auto">
+                        <div className="relative flex-grow sm:max-w-xs w-full">
+                           <input 
+                             type="text"
+                             placeholder="✨ KI-Suche..."
+                             value={searchQuery}
+                             onChange={(e) => setSearchQuery(e.target.value)}
+                             onKeyDown={(e) => e.key === 'Enter' && onSearch()}
+                             className="w-full pl-3 pr-10 py-2 rounded-full text-black placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                           />
+                           <button onClick={onSearch} className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500 hover:text-blue-600">
+                             <SearchIcon />
+                           </button>
+                        </div>
+                        <div className="hidden sm:flex items-center space-x-2 ml-4">
+                            {currentFolder && viewMode === 'browse' && (
+                                <button onClick={onSummarize} title="Ordner zusammenfassen" className="p-2 rounded-full hover:bg-blue-700"><SparklesIcon /></button>
+                            )}
+                            <label htmlFor="import-input-desktop" className="p-2 rounded-full hover:bg-blue-700 cursor-pointer" title="Daten Wiederherstellen"><svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg></label>
+                            <input type="file" id="import-input-desktop" className="hidden" accept=".zip" onChange={onImport} />
+                            <button onClick={onExport} title="Daten Sichern" className="p-2 rounded-full hover:bg-blue-700"><svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg></button>
+                        </div>
+                     </div>
+                </header>
+            );
+        }
+
+        const getFileIcon = (fileName) => {
+            const lower = fileName.toLowerCase();
+            if (lower.endsWith('.pdf')) return <PdfFileIcon />;
+            if (['.mp4', '.mov', '.webm', '.avi', '.mkv'].some(ext => lower.endsWith(ext))) return <VideoFileIcon />;
+            if (['.mp3', '.wav', '.ogg', '.m4a', '.flac'].some(ext => lower.endsWith(ext))) return <AudioFileIcon />;
+            if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg'].some(ext => lower.endsWith(ext))) return <ImageFileIcon />;
+            return <FolderIcon />; // Fallback for unknown file types
+        };
+
+        function MainContent({ folders, files, onFolderClick, onFileClick, onDeleteClick, onShareClick, isSearchResult = false }) {
+            if (folders.length === 0 && files.length === 0) {
+                const message = isSearchResult ? "Keine Ergebnisse für Ihre Suche gefunden." : "Dieser Ordner ist leer.";
+                return <main className="flex-grow p-4 overflow-y-auto h-full flex items-center justify-center text-slate-500"><p>{message}</p></main>;
+            }
+            return (
+                <main className="flex-grow p-4 overflow-y-auto">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4">
+                        {folders.map(folder => (
+                            <div key={folder.id} onClick={() => onFolderClick(folder.id)} className="relative aspect-square bg-white rounded-lg shadow p-2 cursor-pointer text-center flex flex-col items-center justify-center">
+                                <FolderIcon />
+                                <span title={folder.name} className="mt-2 w-full text-sm font-medium text-slate-700 truncate">{folder.name}</span>
+                                <div onClick={(e) => { e.stopPropagation(); onDeleteClick({ id: folder.id, type: 'folder' }); }} className="absolute top-1 right-1 p-1 text-slate-400 hover:text-red-500 rounded-full"><DeleteIcon /></div>
+                            </div>
+                        ))}
+                        {files.map(file => (
+                            <div key={file.id} onClick={() => onFileClick(file)} className="relative aspect-square bg-white rounded-lg shadow p-2 cursor-pointer text-center flex flex-col items-center justify-center">
+                                {getFileIcon(file.name)}
+                                <span title={file.name} className="mt-2 w-full text-sm font-medium text-slate-700 truncate">{file.name}</span>
+                                <div className="absolute top-1 right-1 flex">
+                                    <button onClick={(e) => { e.stopPropagation(); onShareClick(file); }} className="p-1 text-slate-400 hover:text-blue-500 rounded-full" title="Teilen">
+                                        <ShareIcon />
+                                    </button>
+                                    <button onClick={(e) => { e.stopPropagation(); onDeleteClick({ id: file.id, type: 'file' }); }} className="p-1 text-slate-400 hover:text-red-500 rounded-full" title="Löschen">
+                                        <DeleteIcon />
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </main>
+            );
+        }
+
+        function TrashView({ trashItems, onRestore, onDelete, onEmptyTrash }) {
+             return (
+                <main className="flex-grow p-4 overflow-y-auto">
+                    {trashItems.length > 0 && (
+                        <div className="flex justify-end mb-4">
+                            <button 
+                                onClick={onEmptyTrash}
+                                className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg flex items-center"
+                            >
+                                <TrashIcon/> <span className="ml-2">Papierkorb leeren</span>
+                            </button>
+                        </div>
+                    )}
+                    {trashItems.length === 0 ? (
+                         <div className="flex-grow h-full flex items-center justify-center text-slate-500"><p>Der Papierkorb ist leer.</p></div>
+                    ) : (
+                        <ul className="space-y-3">
+                            {trashItems.sort((a,b) => new Date(b.deletedAt) - new Date(a.deletedAt)).map(trashed => (
+                                <li key={trashed.item.id} className="bg-white rounded-lg shadow p-4 flex items-center justify-between">
+                                    <div className="flex items-center space-x-3 overflow-hidden">
+                                        {getFileIcon(trashed.item.name)}
+                                        <div className="overflow-hidden">
+                                            <p className="font-semibold text-slate-800 truncate">{trashed.item.name}</p>
+                                            <p className="text-sm text-slate-500">Gelöscht am: {new Date(trashed.deletedAt).toLocaleString()}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <button onClick={() => onRestore(trashed)} className="p-2 text-slate-500 hover:text-green-600" title="Wiederherstellen">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h5M7 9a7 7 0 112.5 7.9M12 21a9 9 0 009-9h-4" /></svg>
+                                        </button>
+                                        <button onClick={() => onDelete(trashed)} className="p-2 text-slate-500 hover:text-red-600" title="Endgültig löschen">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                        </button>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </main>
+            );
+        }
+
+        function ActionButtons({ currentFolderId, isMediaFolder, onAddFolderClick, onFileUpload }) {
+            const fileInputAccept = isMediaFolder ? "image/*,video/*,audio/*" : "image/*,.pdf";
+            const uploadTitle = isMediaFolder ? "Mediendatei hochladen" : "Datei in Ordner hochladen";
+
+            return (
+                <div className="fixed bottom-6 right-6 flex flex-col items-end space-y-3">
+                    {currentFolderId && (
+                        <label htmlFor="file-upload-input" className="bg-green-500 hover:bg-green-600 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg cursor-pointer" title={uploadTitle}>
+                            <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M12 15l-4-4m0 0l4-4m-4 4h12" /></svg>
+                        </label>
+                    )}
+                    <input type="file" id="file-upload-input" className="hidden" accept={fileInputAccept} onChange={(e) => onFileUpload(e.target.files[0])} />
+                    {!isMediaFolder && (
+                        <button onClick={onAddFolderClick} className="bg-blue-500 hover:bg-blue-600 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg" title="Neuen Ordner erstellen">
+                            <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2-2H5a2 2 0 01-2-2z" /></svg>
+                        </button>
+                    )}
+                </div>
+            );
+        }
+
+        function LoadingModal({ message }) {
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
+                    <div className="bg-white rounded-lg p-6 shadow-xl w-full max-w-sm flex flex-col items-center text-center">
+                        <div className="spinner mb-4"></div>
+                        <h2 className="text-lg font-bold mb-2">Bitte warten</h2>
+                        <p className="text-slate-700">{message}</p>
+                    </div>
+                </div>
+            );
+        }
+
+        function AddFolderModal({ onAdd, onCancel }) {
+            const [name, setName] = useState('');
+            const [isGenerating, setIsGenerating] = useState(false);
+
+            const handleGenerateName = async () => {
+                if (!name.trim()) return;
+                setIsGenerating(true);
+                try {
+                    const prompt = `Erstelle einen kurzen, prägnanten und gut strukturierten Ordnernamen basierend auf dieser Beschreibung. Antworte nur mit dem Ordnernamen, ohne zusätzliche Erklärung. Beschreibung: "${name}"`;
+                    const apiKey = "";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+                    const payload = { contents: [{ parts: [{ text: prompt }] }] };
+                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    if (!response.ok) throw new Error('API request failed');
+                    const result = await response.json();
+                    const suggestedName = result.candidates[0].content.parts[0].text.trim();
+                    setName(suggestedName);
+                } catch (error) {
+                    console.error("Fehler bei der Namensgenerierung:", error);
+                } finally {
+                    setIsGenerating(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+                    <div className="bg-white rounded-lg p-6 shadow-xl w-11/12 max-w-sm">
+                        <h2 className="text-lg font-bold mb-4">Neuen Ordner erstellen</h2>
+                        <div className="relative">
+                            <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="border rounded-md w-full p-2 mb-4 pr-10" placeholder="Beschreibung oder Name..." autoFocus />
+                            <button onClick={handleGenerateName} disabled={isGenerating} className="absolute top-2 right-2 text-purple-600 hover:text-purple-800 disabled:opacity-50">
+                                <SparklesIcon className="h-6 w-6" />
+                            </button>
+                        </div>
+                        <div className="flex justify-end space-x-2">
+                            <button onClick={onCancel} className="bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded-md">Abbrechen</button>
+                            <button onClick={() => onAdd(name)} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md">Erstellen</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+
+        function ConfirmMoveToTrashModal({ onDelete, onCancel }) {
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+                    <div className="bg-white rounded-lg p-6 shadow-xl w-11/12 max-w-sm text-center">
+                        <h2 className="text-lg font-bold mb-2">In Papierkorb verschieben?</h2>
+                        <p className="mb-4 text-slate-600">Möchten Sie das Dokument wirklich in den Papierkorb verschieben?</p>
+                        <div className="flex justify-center space-x-2">
+                            <button onClick={onCancel} className="bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded-md">Abbrechen</button>
+                            <button onClick={onDelete} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md">Ja, verschieben</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function ConfirmPermanentDeleteFolderModal({ onDelete, onCancel }) {
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+                    <div className="bg-white rounded-lg p-6 shadow-xl w-11/12 max-w-sm text-center">
+                        <h2 className="text-lg font-bold mb-2">Ordner endgültig löschen?</h2>
+                        <p className="mb-4 text-slate-600">Möchten Sie den Ordner und seinen gesamten Inhalt wirklich endgültig löschen? Diese Aktion kann nicht rückgängig gemacht werden.</p>
+                        <div className="flex justify-center space-x-2">
+                            <button onClick={onCancel} className="bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded-md">Abbrechen</button>
+                            <button onClick={onDelete} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md">Ja, endgültig löschen</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function ConfirmEmptyTrashModal({ onConfirm, onCancel }) {
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+                    <div className="bg-white rounded-lg p-6 shadow-xl w-11/12 max-w-sm text-center">
+                        <h2 className="text-lg font-bold mb-2">Papierkorb leeren?</h2>
+                        <p className="mb-4 text-slate-600">Möchten Sie alle Objekte im Papierkorb wirklich endgültig löschen? Diese Aktion kann nicht rückgängig gemacht werden.</p>
+                        <div className="flex justify-center space-x-2">
+                            <button onClick={onCancel} className="bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded-md">Abbrechen</button>
+                            <button onClick={onConfirm} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md">Ja, alles löschen</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+        
+        function PreviewModal({ file, blobUrl, onCancel }) {
+            useEffect(() => {
+                return () => URL.revokeObjectURL(blobUrl);
+            }, [blobUrl]);
+
+            const getPreviewElement = () => {
+                const lowerName = file.name.toLowerCase();
+                 if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp'].some(ext => lowerName.endsWith(ext))) {
+                    return <img src={blobUrl} alt={file.name} className="max-w-full max-h-[70vh] object-contain" />;
+                }
+                if (['.mp4', '.mov', '.webm'].some(ext => lowerName.endsWith(ext))) {
+                    return <video src={blobUrl} controls className="max-w-full max-h-[70vh]"></video>;
+                }
+                 if (['.mp3', '.wav', '.ogg', '.m4a'].some(ext => lowerName.endsWith(ext))) {
+                    return <audio src={blobUrl} controls className="w-full"></audio>;
+                }
+                if (lowerName.endsWith('.pdf')) {
+                    return <PDFViewer url={blobUrl} />;
+                }
+                return <p className="text-center text-slate-500 my-8">Keine Vorschau für diesen Dateityp verfügbar.</p>;
+            };
+
+            return (
+                 <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
+                    <div className="bg-white rounded-lg p-4 shadow-xl w-full max-w-3xl flex flex-col">
+                        <h2 className="text-lg font-bold mb-4 truncate" title={file.name}>{file.name}</h2>
+                        <div className="flex-grow flex items-center justify-center bg-gray-100 rounded-md mb-4 overflow-auto">
+                           {getPreviewElement()}
+                        </div>
+                        <div className="flex justify-end space-x-2">
+                             <button onClick={onCancel} className="bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded-md">Schließen</button>
+                             <a href={blobUrl} download={file.name} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md">
+                                Herunterladen
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function PDFViewer({ url }) {
+            const canvasRef = useRef(null);
+            const containerRef = useRef(null);
+            const [pdfDoc, setPdfDoc] = useState(null);
+            const [pageNum, setPageNum] = useState(1);
+            const [numPages, setNumPages] = useState(0);
+            const [isLoading, setIsLoading] = useState(true);
+            const renderTask = useRef(null);
+
+            useEffect(() => {
+                const loadingTask = pdfjsLib.getDocument(url);
+                loadingTask.promise.then(doc => {
+                    setPdfDoc(doc);
+                    setNumPages(doc.numPages);
+                }, console.error);
+            }, [url]);
+
+            useEffect(() => {
+                if (!pdfDoc) return;
+                
+                let isCancelled = false;
+                
+                const renderPage = async (num) => {
+                    setIsLoading(true);
+
+                    if (renderTask.current) {
+                        renderTask.current.cancel();
+                    }
+
+                    const page = await pdfDoc.getPage(num);
+                    const canvas = canvasRef.current;
+                    const container = containerRef.current;
+                    if (!canvas || !container) return;
+
+                    const desiredWidth = container.clientWidth;
+                    const viewport = page.getViewport({ scale: 1 });
+                    const scale = (desiredWidth / viewport.width) * 0.98; // Use 98% width to avoid scrollbars
+                    const scaledViewport = page.getViewport({ scale });
+
+                    const context = canvas.getContext('2d');
+                    canvas.height = scaledViewport.height;
+                    canvas.width = scaledViewport.width;
+
+                    const task = page.render({
+                        canvasContext: context,
+                        viewport: scaledViewport
+                    });
+                    renderTask.current = task;
+
+                    await task.promise;
+                    
+                    if (!isCancelled) {
+                        setIsLoading(false);
+                    }
+                };
+
+                renderPage(pageNum);
+                
+                return () => {
+                    isCancelled = true;
+                    if (renderTask.current) {
+                        renderTask.current.cancel();
+                    }
+                };
+
+            }, [pdfDoc, pageNum]);
+
+            const onPrevPage = () => setPageNum(p => Math.max(1, p - 1));
+            const onNextPage = () => setPageNum(p => Math.min(numPages, p + 1));
+
+            return (
+                <div className="flex flex-col items-center justify-start h-full w-full">
+                    <div ref={containerRef} className="overflow-auto w-full flex-grow flex justify-center">
+                        {isLoading && <div className="spinner my-8"></div>}
+                        <canvas ref={canvasRef} style={{ display: isLoading ? 'block' : 'block' }} className={isLoading ? 'opacity-50' : ''}></canvas>
+                    </div>
+                    {numPages > 1 && (
+                        <div className="flex items-center justify-center space-x-4 p-2 bg-gray-200 rounded-b-md w-full sticky bottom-0">
+                            <button onClick={onPrevPage} disabled={pageNum <= 1 || isLoading} className="px-3 py-1 bg-gray-300 rounded disabled:opacity-50">‹</button>
+                            <span>Seite {pageNum} von {numPages}</span>
+                            <button onClick={onNextPage} disabled={pageNum >= numPages || isLoading} className="px-3 py-1 bg-gray-300 rounded disabled:opacity-50">›</button>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        
+        function ShareModal({ file, blobUrl, onCancel }) {
+            useEffect(() => {
+                return () => URL.revokeObjectURL(blobUrl);
+            }, [blobUrl]);
+
+            const handlePrint = () => {
+                const iframe = document.createElement('iframe');
+                iframe.style.display = 'none';
+                iframe.src = blobUrl;
+                document.body.appendChild(iframe);
+                iframe.onload = () => {
+                    try {
+                        iframe.contentWindow.focus();
+                        iframe.contentWindow.print();
+                    } catch (error) {
+                         window.open(blobUrl, '_blank');
+                    } finally {
+                        setTimeout(() => document.body.removeChild(iframe), 1000);
+                    }
+                };
+                onCancel();
+            };
+            
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+                    <div className="bg-white rounded-lg p-6 shadow-xl w-full max-w-sm">
+                        <h2 className="text-lg font-bold mb-2">Datei teilen</h2>
+                        <p className="mb-4 text-slate-700 truncate font-semibold">{file.name}</p>
+                        <p className="text-sm text-slate-500 mb-4">Ihr Browser unterstützt nicht das direkte Teilen. Bitte wählen Sie eine Alternative:</p>
+                        <div className="space-y-3">
+                            <button onClick={handlePrint} className="w-full bg-gray-200 hover:bg-gray-300 text-black px-4 py-2 rounded-md">Drucken</button>
+                            <a href={`mailto:?subject=Datei: ${file.name}&body=Anbei die Datei ${file.name}.`} className="block w-full text-center bg-gray-200 hover:bg-gray-300 text-black px-4 py-2 rounded-md">
+                                Per E-Mail senden
+                            </a>
+                            <a href={blobUrl} download={file.name} className="block w-full text-center bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md">
+                                Herunterladen
+                            </a>
+                        </div>
+                         <div className="flex justify-end mt-6">
+                             <button onClick={onCancel} className="bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded-md">Schließen</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+        
+        function ExportReadyModal({ backupName, blobUrl, onCancel }) {
+            useEffect(() => {
+                return () => URL.revokeObjectURL(blobUrl);
+            }, [blobUrl]);
+
+            return (
+                 <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+                    <div className="bg-white rounded-lg p-6 shadow-xl w-full max-w-sm">
+                        <h2 className="text-lg font-bold mb-4">Backup bereit</h2>
+                        <p className="mb-6 text-slate-700">Ihre Sicherung ist bereit zum Herunterladen.</p>
+                        <div className="flex justify-end space-x-2">
+                             <button onClick={onCancel} className="bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded-md">Schließen</button>
+                             <a href={blobUrl} download={backupName} onClick={onCancel} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md">
+                                Backup herunterladen
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+
+        function InfoModal({ message, onOk }) {
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+                    <div className="bg-white rounded-lg p-6 shadow-xl w-full max-w-sm">
+                        <h2 className="text-lg font-bold mb-4">Hinweis</h2>
+                        <p className="mb-6 text-slate-700">{message}</p>
+                        <div className="flex justify-end">
+                            <button onClick={onOk} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md">
+                                Verstanden
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function FileProcessingModal({ data, onSave, onCancel, existingFolders }) {
+            const { originalFile, content } = data;
+            
+            const getFileParts = (fileName) => {
+                const lastDotIndex = fileName.lastIndexOf('.');
+                if (lastDotIndex === -1) return { base: fileName, ext: '' };
+                return { base: fileName.slice(0, lastDotIndex), ext: fileName.slice(lastDotIndex) };
+            };
+
+            const [baseName, setBaseName] = useState(getFileParts(originalFile.name).base);
+            const [extension, setExtension] = useState(getFileParts(originalFile.name).ext);
+            const [originalExtension] = useState(getFileParts(originalFile.name).ext);
+            const [folderName, setFolderName] = useState('');
+            const [tasks, setTasks] = useState([]);
+            const [isLoading, setIsLoading] = useState({ suggestions: false, tasks: false });
+            const [error, setError] = useState({ suggestions: '', tasks: '' });
+
+            const getSuggestionsFromGemini = useCallback(async () => {
+                setIsLoading(prev => ({ ...prev, suggestions: true }));
+                setError(prev => ({ ...prev, suggestions: '' }));
+                const topLevelFolders = existingFolders.map(f => f.name).join(', ');
+                const prompt = `Analysiere den folgenden Dokumententext und schlage einen passenden Ordner und einen aussagekräftigen Dateinamen vor. Der Dateiname sollte dem Format 'JJJJ-MM-TT_Beschreibung' folgen (ohne Dateiendung). Existierende Hauptordner sind: "${topLevelFolders}". Wenn keiner passt, schlage einen neuen, passenden Ordnernamen vor. Gib deine Antwort als JSON-Objekt. Dokumententext: "${content}"`;
+                const schema = { type: "OBJECT", properties: { suggestedFolderName: { type: "STRING" }, suggestedFileNameBase: { type: "STRING" } }, required: ["suggestedFolderName", "suggestedFileNameBase"] };
+                const apiKey = "";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+                const payload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json", responseSchema: schema } };
+                try {
+                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    if (!response.ok) throw new Error(`API-Fehler: ${response.statusText}`);
+                    const result = await response.json();
+                    const jsonText = result.candidates[0].content.parts[0].text;
+                    const parsedJson = JSON.parse(jsonText);
+                    setBaseName(parsedJson.suggestedFileNameBase);
+                    setFolderName(parsedJson.suggestedFolderName);
+                    setExtension('.pdf');
+                } catch (err) {
+                    console.error("Fehler bei der Gemini-API-Anfrage:", err);
+                    setError(prev => ({ ...prev, suggestions: "Vorschläge konnten nicht geladen werden." }));
+                } finally {
+                    setIsLoading(prev => ({ ...prev, suggestions: false }));
+                }
+            }, [content, existingFolders]);
+            
+            const getTasksFromGemini = useCallback(async () => {
+                setIsLoading(prev => ({ ...prev, tasks: true }));
+                setError(prev => ({ ...prev, tasks: '' }));
+                setTasks([]);
+                const prompt = `Basierend auf diesem Dokumententext, schlage 1-3 relevante, ausführbare Aufgaben vor. Beispiel: Für eine Rechnung mit Fälligkeitsdatum, schlage vor, sie zu bezahlen. Gib die Antwort als JSON-Array von Strings. Text: "${content}"`;
+                const schema = { type: "ARRAY", items: { type: "STRING" } };
+                const apiKey = "";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+                const payload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json", responseSchema: schema } };
+                try {
+                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    if (!response.ok) throw new Error(`API-Fehler: ${response.statusText}`);
+                    const result = await response.json();
+                    const jsonText = result.candidates[0].content.parts[0].text;
+                    const parsedJson = JSON.parse(jsonText);
+                    setTasks(parsedJson);
+                } catch (err) {
+                    console.error("Fehler bei der Gemini-API-Anfrage für Aufgaben:", err);
+                    setError(prev => ({ ...prev, tasks: "Aufgaben konnten nicht geladen werden." }));
+                } finally {
+                    setIsLoading(prev => ({ ...prev, tasks: false }));
+                }
+            }, [content]);
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+                    <div className="bg-white rounded-lg p-6 shadow-xl w-full max-w-md">
+                        <h2 className="text-lg font-bold mb-4">Datei verarbeiten</h2>
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Erkannter Text (simuliert)</label>
+                            <textarea className="border rounded-md w-full p-2 h-20 bg-gray-50" readOnly value={content}></textarea>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 mb-4">
+                            <button onClick={getSuggestionsFromGemini} disabled={isLoading.suggestions} className="w-full flex items-center justify-center bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md disabled:bg-purple-300">
+                                <SparklesIcon /> <span className="ml-2">{isLoading.suggestions ? 'Analysiere...' : '✨ Sortieren'}</span>
+                            </button>
+                             <button onClick={getTasksFromGemini} disabled={isLoading.tasks} className="w-full flex items-center justify-center bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-md disabled:bg-teal-300">
+                                <SparklesIcon /> <span className="ml-2">{isLoading.tasks ? 'Analysiere...' : '✨ Aufgaben'}</span>
+                            </button>
+                        </div>
+                        {error.suggestions && <p className="text-red-500 text-sm text-center mb-2">{error.suggestions}</p>}
+                        {error.tasks && <p className="text-red-500 text-sm text-center mb-2">{error.tasks}</p>}
+                        {tasks.length > 0 && (
+                            <div className="mb-4 p-3 bg-teal-50 border border-teal-200 rounded-lg">
+                                <h3 className="text-sm font-bold text-teal-800 mb-2">Vorgeschlagene Aufgaben:</h3>
+                                <ul className="list-disc list-inside text-sm text-teal-700 space-y-1">
+                                    {tasks.map((task, index) => <li key={index}>{task}</li>)}
+                                </ul>
+                            </div>
+                        )}
+                        <div className="mb-4">
+                            <label htmlFor="folderName" className="block text-sm font-medium text-gray-700 mb-1">Ordner</label>
+                            <input id="folderName" type="text" value={folderName} onChange={(e) => setFolderName(e.target.value)} className="border rounded-md w-full p-2" placeholder="Ordnername" />
+                        </div>
+                        <div className="mb-6">
+                            <label htmlFor="fileName" className="block text-sm font-medium text-gray-700 mb-1">Dateiname</label>
+                            <div className="flex">
+                                <input id="fileName" type="text" value={baseName} onChange={(e) => setBaseName(e.target.value)} className="border rounded-l-md w-full p-2" placeholder="Dateiname" />
+                                <select value={extension} onChange={(e) => setExtension(e.target.value)} className="border-t border-b border-r rounded-r-md p-2 bg-gray-50">
+                                    <option value={originalExtension}>{originalExtension}</option>
+                                    {originalExtension !== '.pdf' && <option value=".pdf">.pdf</option>}
+                                </select>
+                            </div>
+                        </div>
+                        <div className="flex justify-end space-x-2">
+                            <button onClick={onCancel} className="bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded-md">Abbrechen</button>
+                            <button onClick={() => onSave({ fileName: `${baseName}${extension}`, folderName, originalFile })} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md">Speichern</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function SummaryModal({ data, onCancel }) {
+            const { folderName, files } = data;
+            const [summary, setSummary] = useState('');
+            const [isLoading, setIsLoading] = useState(true);
+            const [error, setError] = useState('');
+
+            const getSummaryFromGemini = useCallback(async () => {
+                if (files.length === 0) {
+                    setSummary("Dieser Ordner enthält keine Dateien, die zusammengefasst werden könnten.");
+                    setIsLoading(false);
+                    return;
+                }
+                setIsLoading(true);
+                setError('');
+                const fileNames = files.map(f => f.name).join(', ');
+                const prompt = `Basierend auf der folgenden Liste von Dateinamen aus dem Ordner "${folderName}", erstelle eine kurze Zusammenfassung (1-2 Sätze) über den wahrscheinlichen Inhalt dieses Ordners. Dateinamen: ${fileNames}`;
+                const apiKey = "";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+                const payload = { contents: [{ parts: [{ text: prompt }] }] };
+                try {
+                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    if (!response.ok) throw new Error(`API-Fehler: ${response.statusText}`);
+                    const result = await response.json();
+                    const text = result.candidates[0].content.parts[0].text;
+                    setSummary(text);
+                } catch (err) {
+                    console.error("Fehler bei der Gemini-API-Anfrage:", err);
+                    setError("Die Zusammenfassung konnte nicht geladen werden.");
+                } finally {
+                    setIsLoading(false);
+                }
+            }, [folderName, files]);
+
+            useEffect(() => {
+                getSummaryFromGemini();
+            }, [getSummaryFromGemini]);
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+                    <div className="bg-white rounded-lg p-6 shadow-xl w-full max-w-md">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-lg font-bold">✨ KI-Zusammenfassung</h2>
+                            <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">&times;</button>
+                        </div>
+                        <div className="min-h-[100px]">
+                            {isLoading && <p className="text-center text-gray-500">Zusammenfassung wird erstellt...</p>}
+                            {error && <p className="text-red-500 text-center">{error}</p>}
+                            {!isLoading && !error && <p className="text-gray-700">{summary}</p>}
+                        </div>
+                        <div className="flex justify-end mt-4">
+                            <button onClick={onCancel} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md">Schließen</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            const swContent = `
+                self.addEventListener('fetch', event => {
+                    event.respondWith(
+                        fetch(event.request).catch(() => caches.match(event.request))
+                    );
+                });
+            `;
+            const swBlob = new Blob([swContent], { type: 'application/javascript' });
+            const swUrl = URL.createObjectURL(swBlob);
+
+            navigator.serviceWorker.register(swUrl)
+                .then(registration => console.log('ServiceWorker registration successful.'))
+                .catch(error => console.log('ServiceWorker registration failed:', error));
+        }
+    </script>
+</body>
+</html>
+
